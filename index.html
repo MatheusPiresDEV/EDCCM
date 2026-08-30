@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avaliações de Álbuns | MusicBox</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Chart.js para os gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome / Ícones Web (Opcional, usando emojis nativos e SVGs limpos) -->
+</head>
+
+<body id="body-main">
+
+    <!-- Canvas para Animações Interativas e Wallpaper de Fundo -->
+    <canvas id="canvas-bg"></canvas>
+    
+    <!-- Elemento para Wallpaper em Imagem/Slide (com Fallback em Loop) -->
+    <div id="wallpaper-container" class="wallpaper-bg"></div>
+
+    <!-- Mensagem de Feedback (Toast) -->
+    <div id="toast" class="toast escondido"></div>
+
+    <!-- TELA DE BLOQUEIO (LOCKSCREEN ESTILO WINDOWS) -->
+    <div id="lockscreen" onclick="desbloquearTela()">
+        <div class="lockscreen-content">
+            <!-- Saudação Dinâmica e Relógio Centralizados -->
+            <div class="lockscreen-header-center">
+                <h2 id="lock-saudacao" class="saudacao-texto">Boa noite! 🌙</h2>
+                <h1 id="lock-hora" class="relogio-digital">00:00:00</h1>
+                <p id="lock-data" class="data-extenso">Carregando data...</p>
+            </div>
+
+            <!-- Caixinha da Frase / Mensagem do Dia Centralizada -->
+            <div class="lockscreen-quote-card">
+                <p id="lock-quote-texto">"A música pode mudar o mundo porque pode mudar as pessoas."</p>
+                <small id="lock-quote-autor">— Bono Vox</small>
+            </div>
+
+            <div class="lockscreen-prompt">
+                Clique em qualquer lugar para desbloquear
+            </div>
+        </div>
+    </div>
+
+    <!-- TELA 1: AUTENTICAÇÃO (Login / Cadastro com Glassmorphism) -->
+    <section id="sec-auth" class="tela escondido">
+        <div class="card-auth">
+            <div class="auth-header">
+                <div class="logo-icon">M</div>
+                <h2>MusicBox</h2>
+                <p>Gerencie e avalie seus álbuns favoritos</p>
+            </div>
+
+            <form id="form-auth" onsubmit="event.preventDefault();">
+                <div class="campo-input">
+                    <input type="email" id="auth-email" placeholder="Seu e-mail" required>
+                </div>
+
+                <div class="campo-input campo-senha">
+                    <input type="password" id="auth-pass" placeholder="Sua senha" required>
+                    <button type="button" id="btn-toggle-pass" title="Ver/Ocultar Senha">Mostrar</button>
+                </div>
+
+                <div class="acoes-auth">
+                    <button type="button" id="btn-login" class="btn-primario">
+                        Entrar
+                    </button>
+                    <button type="button" id="btn-register" class="btn-secundario">
+                        Criar Conta
+                    </button>
+                </div>
+            </form>
+
+            <button type="button" class="btn-voltar-lock" onclick="bloquearTela()">
+                Bloquear Tela
+            </button>
+        </div>
+    </section>
+
+    <!-- CABEÇALHO / NAVBAR PRINCIPAL -->
+    <header id="main-header" class="escondido">
+        <div class="header-brand" onclick="navegarPara('sec-dashboard')">
+            <span class="brand-icon">M</span>
+            <h1>Meu MusicBox</h1>
+        </div>
+
+        <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menu" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+
+        <nav class="nav-menu" id="nav-menu">
+            <button class="nav-btn" onclick="navegarPara('sec-dashboard')">
+                <span class="nav-text">Álbuns</span>
+            </button>
+            <button class="nav-btn btn-destaque" onclick="prepararNovoAlbum()">
+                <span class="nav-text">Novo Álbum</span>
+            </button>
+            <button class="nav-btn" onclick="navegarPara('sec-estatisticas')">
+                <span class="nav-text">Estatísticas</span>
+            </button>
+            <button id="btn-logout" class="nav-btn btn-perigo">
+                <span class="nav-text">Sair</span>
+            </button>
+        </nav>
+    </header>
+
+    <!-- CONTEÚDO PRINCIPAL (CONTAINER RESPONSIVO) -->
+    <main class="container">
+
+        <!-- TELA 2: DASHBOARD / LISTA DE ÁLBUNS -->
+        <section id="sec-dashboard" class="tela escondido">
+            <div class="secao-cabecalho">
+                <h2>Meus Álbuns</h2>
+                <span id="boas-vindas-user" class="badge-saudacao">Bem-vindo!</span>
+            </div>
+
+            <div class="painel-filtros">
+                <div class="filtro-item busca-box">
+                    <input type="text" id="filtro-busca" placeholder="Buscar álbum, artista ou gênero..." oninput="aplicarFiltrosEBuscar()">
+                </div>
+
+                <div class="filtro-item ano-box">
+                    <input type="number" id="filtro-ano" placeholder="Ano (ex: 1984)" oninput="aplicarFiltrosEBuscar()">
+                </div>
+
+                <div class="filtro-item select-box">
+                    <select id="filtro-ordem" onchange="aplicarFiltrosEBuscar()">
+                        <option value="add-desc">Mais Recentes (Adição)</option>
+                        <option value="add-asc">Mais Antigos (Adição)</option>
+                        <option value="nota-desc">Maior Nota → Menor Nota</option>
+                        <option value="nota-asc">Menor Nota → Maior Nota</option>
+                        <option value="ano-desc">Lançamento Mais Recente</option>
+                        <option value="ano-asc">Lançamento Mais Antigo</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Grade Dinâmica dos Álbuns -->
+            <div id="lista-albuns" class="grid-albuns"></div>
+
+            <!-- Controles de Paginação -->
+            <div id="paginacao" class="controles-paginacao">
+                <button id="btn-pag-ant" onclick="mudarPagina(-1)" class="btn-secundario">
+                    <span>⬅️</span> Anterior
+                </button>
+                <span id="info-pagina" class="info-pag">Página 1 de 1</span>
+                <button id="btn-pag-prox" onclick="mudarPagina(1)" class="btn-secundario">
+                    Próximo <span>➡️</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- TELA 3: CADASTRO / EDIÇÃO DE ÁLBUM -->
+        <section id="sec-novo-album" class="tela escondido">
+            <div class="card-formulario">
+                <h2 id="form-titulo">Cadastrar Novo Álbum</h2>
+                
+                <form id="form-album">
+                    <input type="hidden" id="album-id">
+
+                    <div class="grid-form-2col">
+                        <div class="grupo-campo">
+                            <label for="album-nome">Nome do Álbum *</label>
+                            <input type="text" id="album-nome" placeholder="Ex: Master of Puppets" required>
+                        </div>
+
+                        <div class="grupo-campo">
+                            <label for="album-banda">Banda / Artista *</label>
+                            <input type="text" id="album-banda" placeholder="Ex: Metallica" required>
+                        </div>
+                    </div>
+
+                    <div class="grid-form-2col">
+                        <div class="grupo-campo">
+                            <label for="album-ano">Ano de Lançamento *</label>
+                            <input type="number" id="album-ano" min="1900" max="2099" placeholder="Ex: 1986" required>
+                        </div>
+
+                        <div class="grupo-campo">
+                            <label for="album-favorita">Música Favorita (Opcional)</label>
+                            <input type="text" id="album-favorita" placeholder="Ex: Battery">
+                        </div>
+                    </div>
+
+                    <div class="grupo-campo">
+                        <label>Capa do Álbum (Selecione um Arquivo ou Digite a URL)</label>
+                        <div class="grupo-imagem-input">
+                            <input type="file" id="album-file" accept="image/*">
+                            <span class="divisor-ou">OU</span>
+                            <input type="url" id="album-imagem" placeholder="https://link-da-imagem.com/capa.jpg">
+                        </div>
+                    </div>
+
+                    <!-- Previsualização da capa -->
+                    <div id="preview-container" class="preview-box escondido">
+                        <p>Pré-visualização da Capa:</p>
+                        <img id="img-preview" src="" alt="Preview da capa">
+                    </div>
+
+                    <div class="grupo-campo">
+                        <label for="album-obs">Observações / Análise Geral (Opcional)</label>
+                        <textarea id="album-obs" rows="3" placeholder="Escreva o que achou da produção, conceito, etc..."></textarea>
+                    </div>
+
+                    <!-- Seção de Faixas / Músicas -->
+                    <div class="secao-faixas">
+                        <div class="faixas-header">
+                            <h3>🎵 Lista de Faixas e Notas</h3>
+                            <button type="button" id="btn-add-faixa" class="btn-secundario btn-sm">
+                                Adicionar Faixa
+                            </button>
+                        </div>
+                        <div id="container-faixas" class="lista-faixas-inputs"></div>
+                    </div>
+
+                    <div class="form-acoes">
+                        <button type="submit" id="btn-salvar" class="btn-sucesso">
+                            Salvar Álbum
+                        </button>
+                        <button type="button" onclick="navegarPara('sec-dashboard')" class="btn-secundario">
+                            Cancelar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- TELA 4: ESTATÍSTICAS -->
+        <section id="sec-estatisticas" class="tela escondido">
+            <div class="secao-cabecalho">
+                <h2>Painel de Estatísticas</h2>
+            </div>
+
+            <!-- Cards de Métricas Responsivos -->
+            <div class="cards-stats">
+                <div class="card">
+                    <div class="card-icon">📀</div>
+                    <div class="card-info">
+                        <h3>Total de Álbuns</h3>
+                        <p id="stat-total">0</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🏆</div>
+                    <div class="card-info">
+                        <h3>Melhor Álbum</h3>
+                        <p id="stat-melhor">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">⚠️</div>
+                    <div class="card-info">
+                        <h3>Pior Álbum</h3>
+                        <p id="stat-pior">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🎤</div>
+                    <div class="card-info">
+                        <h3>Banda Favorita</h3>
+                        <p id="stat-banda-top">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🌟</div>
+                    <div class="card-info">
+                        <h3>Década de Ouro</h3>
+                        <p id="stat-decada-media">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📈</div>
+                    <div class="card-info">
+                        <h3>Década Dominante</h3>
+                        <p id="stat-decada-qtd">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📅</div>
+                    <div class="card-info">
+                        <h3>Dia Mais Ativo</h3>
+                        <p id="stat-dia-ativo">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">⏱️</div>
+                    <div class="card-info">
+                        <h3>Última Adição</h3>
+                        <p id="stat-dias-off">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Seção de Gráficos em Grid -->
+            <div class="grid-graficos">
+                <div class="container-grafico">
+                    <h3><span>📊</span> Média de Notas por Década de Lançamento</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="graficoDecadas"></canvas>
+                    </div>
+                </div>
+
+                <div class="container-grafico">
+                    <h3><span>📈</span> Nota x Ano de Lançamento (Todos os Álbuns)</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="graficoCorrelacao"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MODAL 1: OBSERVAÇÕES -->
+    <div id="modal-obs" class="modal-overlay escondido" onclick="fecharModalObs(false, event)">
+        <div class="modal-conteudo">
+            <div class="modal-cabecalho">
+                <h3>Observações do Álbum</h3>
+                <button class="btn-fechar" onclick="fecharModalObs(true)">X</button>
+            </div>
+            <div class="modal-corpo">
+                <p id="modal-obs-texto"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: DETALHES DO ÁLBUM E FAIXAS -->
+    <div id="modal-detalhes" class="modal-overlay escondido" onclick="fecharModalDetalhes(false, event)">
+        <div class="modal-conteudo modal-lg">
+            <div class="modal-cabecalho">
+                <h3 id="modal-album-titulo">Detalhes do Álbum</h3>
+                <button class="btn-fechar" onclick="fecharModalDetalhes(true)">X</button>
+            </div>
+            <div class="modal-corpo grid-detalhes">
+                <div class="detalhes-capa">
+                    <img id="modal-album-capa" src="" alt="Capa">
+                </div>
+                <div class="detalhes-info">
+                    <h2 id="modal-album-nome">Nome do Álbum</h2>
+                    <h4 id="modal-album-banda">Artista / Banda</h4>
+                    <p id="modal-album-meta">Ano: 1990 | Média: ⭐ 0.0</p>
+                    
+                    <div class="faixas-lista-container">
+                        <h5>Faixas e Avaliações:</h5>
+                        <ul id="modal-lista-faixas" class="lista-faixas-view"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script Principal -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>
