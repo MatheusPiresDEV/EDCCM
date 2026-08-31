@@ -176,6 +176,20 @@ function sortearFraseELockscreen() {
 sortearFraseELockscreen();
 bloquearTela();
 
+const lockscreenEl = document.getElementById('lockscreen');
+if (lockscreenEl) {
+  lockscreenEl.addEventListener('click', () => {
+    window.desbloquearTela();
+  });
+}
+
+const btnVoltarLock = document.getElementById('btn-voltar-lock');
+if (btnVoltarLock) {
+  btnVoltarLock.addEventListener('click', () => {
+    window.bloquearTela();
+  });
+}
+
 // WALLPAPER REATIVO AO HORÁRIO E INTERATIVO (CANVAS)
 const canvas = document.getElementById('canvas-bg');
 const ctx = canvas.getContext('2d');
@@ -466,36 +480,47 @@ function validarUsuarioParaSalvar() {
   return true;
 }
 
-const menuToggle = document.getElementById('menu-toggle');
-const navMenu = document.getElementById('nav-menu');
+function fecharMenuMobile() {
+  const menuToggle = document.getElementById('menu-toggle');
+  const navMenu = document.getElementById('nav-menu');
 
-if (menuToggle && navMenu) {
-  const atualizarEstadoMenu = () => {
-    const mobile = window.innerWidth <= 680;
-    if (!mobile) {
-      navMenu.classList.remove('is-open');
-      menuToggle.setAttribute('aria-expanded', 'false');
-      navMenu.style.display = '';
-    }
-  };
+  if (navMenu) navMenu.classList.remove('active');
+  if (menuToggle) {
+    menuToggle.classList.remove('active');
+    menuToggle.setAttribute('aria-expanded', 'false');
+  }
+}
 
-  menuToggle.addEventListener('click', () => {
-    const isOpen = navMenu.classList.toggle('is-open');
-    menuToggle.setAttribute('aria-expanded', String(isOpen));
-  });
+document.addEventListener('DOMContentLoaded', () => {
+  const menuToggle = document.getElementById('menu-toggle');
+  const navMenu = document.getElementById('nav-menu');
 
-  navMenu.querySelectorAll('.nav-btn').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (window.innerWidth <= 680) {
-        navMenu.classList.remove('is-open');
-        menuToggle.setAttribute('aria-expanded', 'false');
+  if (menuToggle && navMenu) {
+    menuToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isActive = navMenu.classList.toggle('active');
+      menuToggle.classList.toggle('active', isActive);
+      menuToggle.setAttribute('aria-expanded', String(isActive));
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!navMenu.classList.contains('active')) return;
+      if (!navMenu.contains(e.target) && !menuToggle.contains(e.target)) {
+        fecharMenuMobile();
       }
     });
-  });
 
-  window.addEventListener('resize', atualizarEstadoMenu);
-  atualizarEstadoMenu();
-}
+    document.querySelectorAll('.nav-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const target = button.getAttribute('data-target');
+        if (target) {
+          fecharMenuMobile();
+          window.navegarPara(target);
+        }
+      });
+    });
+  }
+});
 
 document.getElementById('btn-toggle-pass').addEventListener('click', () => {
   const inputPass = document.getElementById('auth-pass');
@@ -512,7 +537,7 @@ window.navegarPara = function(idTela) {
 
   const mapeamento = {
     'sec-dashboard': 'sec-dashboard',
-    'sec-novo-album': 'sec-dashboard',
+    'sec-novo-album': 'sec-novo-album',
     'sec-top5': 'sec-top5',
     'sec-viagens': 'sec-viagens',
     'sec-observacoes': 'sec-observacoes',
@@ -521,14 +546,12 @@ window.navegarPara = function(idTela) {
 
   document.querySelectorAll('.nav-btn').forEach((button) => {
     const alvo = button.getAttribute('data-target');
-    button.classList.toggle('active', alvo === mapeamento[idTela]);
-    button.setAttribute('aria-current', alvo === mapeamento[idTela] ? 'page' : 'false');
+    const ativo = alvo === mapeamento[idTela];
+    button.classList.toggle('active', ativo);
+    button.setAttribute('aria-current', ativo ? 'page' : 'false');
   });
 
-  if (navMenu && menuToggle) {
-    navMenu.classList.remove('is-open');
-    menuToggle.setAttribute('aria-expanded', 'false');
-  }
+  fecharMenuMobile();
 
   if (idTela === 'sec-dashboard') carregarAlbuns();
   if (idTela === 'sec-estatisticas') carregarEstatisticas();
@@ -571,6 +594,8 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 });
 
 onAuthStateChanged(auth, (user) => {
+  const lockscreen = document.getElementById('lockscreen');
+
   if (top5Unsubscribe) top5Unsubscribe();
   if (viagensUnsubscribe) viagensUnsubscribe();
   if (observacoesUnsubscribe) observacoesUnsubscribe();
@@ -578,6 +603,11 @@ onAuthStateChanged(auth, (user) => {
   if (user) {
     usuarioAtual = user;
     document.getElementById('main-header').classList.remove('escondido');
+    if (lockscreen) {
+      lockscreen.style.zIndex = '0';
+      lockscreen.style.pointerEvents = 'none';
+      lockscreen.classList.add('escondido');
+    }
     mostrarWallpaperPrincipal();
     subscribeTop5();
     subscribeViagens();
@@ -587,6 +617,12 @@ onAuthStateChanged(auth, (user) => {
     usuarioAtual = null;
     const mainHeader = document.getElementById('main-header');
     if (mainHeader) mainHeader.classList.add('escondido');
+
+    if (lockscreen) {
+      lockscreen.style.zIndex = '2000';
+      lockscreen.style.pointerEvents = 'auto';
+      lockscreen.classList.remove('escondido');
+    }
 
     bloquearTela();
   }

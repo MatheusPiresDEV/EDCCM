@@ -23,7 +23,7 @@
     <div id="toast" class="toast escondido"></div>
 
     <!-- TELA DE BLOQUEIO (LOCKSCREEN ESTILO WINDOWS) -->
-    <div id="lockscreen" onclick="desbloquearTela()">
+    <div id="lockscreen">
         <div class="lockscreen-content">
             <!-- Saudação Dinâmica e Relógio Centralizados -->
             <div class="lockscreen-header-center">
@@ -73,7 +73,7 @@
                 </div>
             </form>
 
-            <button type="button" class="btn-voltar-lock" onclick="bloquearTela()">
+            <button type="button" class="btn-voltar-lock" id="btn-voltar-lock">
                 Bloquear Tela
             </button>
         </div>
@@ -93,22 +93,22 @@
         </button>
 
         <nav class="nav-menu" id="nav-menu">
-            <button class="nav-btn active" data-target="sec-dashboard" onclick="navegarPara('sec-dashboard')">
+            <button class="nav-btn active" data-target="sec-dashboard">
                 <span class="nav-text">Álbuns</span>
             </button>
-            <button class="nav-btn btn-destaque" data-target="sec-dashboard" onclick="prepararNovoAlbum()">
+            <button class="nav-btn btn-destaque" data-target="sec-novo-album">
                 <span class="nav-text">Novo Álbum</span>
             </button>
-            <button class="nav-btn" data-target="sec-top5" onclick="navegarPara('sec-top5')">
+            <button class="nav-btn" data-target="sec-top5">
                 <span class="nav-text">Top 5</span>
             </button>
-            <button class="nav-btn" data-target="sec-viagens" onclick="navegarPara('sec-viagens')">
+            <button class="nav-btn" data-target="sec-viagens">
                 <span class="nav-text">Viagens</span>
             </button>
-            <button class="nav-btn" data-target="sec-observacoes" onclick="navegarPara('sec-observacoes')">
+            <button class="nav-btn" data-target="sec-observacoes">
                 <span class="nav-text">Observações</span>
             </button>
-            <button class="nav-btn" data-target="sec-estatisticas" onclick="navegarPara('sec-estatisticas')">
+            <button class="nav-btn" data-target="sec-estatisticas">
                 <span class="nav-text">Estatísticas</span>
             </button>
             <button id="btn-logout" class="nav-btn btn-perigo" data-target="sec-dashboard">
