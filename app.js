@@ -877,7 +877,11 @@ function addLinhaTarefa(texto = '', concluida = false, criadoEm = null) {
 function subscribeViagens() {
   if (!usuarioAtual) return;
 
-  const q = query(collection(db, 'viagens'), where('userId', '==', usuarioAtual.uid));
+  const q = query(
+    collection(db, 'viagens'),
+    where('categoria', '==', 'viagem'),
+    where('userId', '==', usuarioAtual.uid)
+  );
   if (viagensUnsubscribe) viagensUnsubscribe();
 
   viagensUnsubscribe = onSnapshot(q, (snapshot) => {
@@ -956,12 +960,14 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
   try {
     if (id) {
       await updateDoc(doc(db, 'viagens', id), {
+        categoria: 'viagem',
         titulo,
         atualizadoEm: serverTimestamp()
       });
       mostrarToast('Viagem atualizada!');
     } else {
       await addDoc(collection(db, 'viagens'), {
+        categoria: 'viagem',
         titulo,
         userId: usuarioAtivo.uid,
         realizada: false,
@@ -1010,6 +1016,7 @@ document.getElementById('lista-viagens').addEventListener('change', async (event
   const concluida = checkbox.checked;
 
   await updateDoc(doc(db, 'viagens', viagemId), {
+    categoria: 'viagem',
     realizada: concluida,
     realizadaEm: concluida ? serverTimestamp() : null,
     atualizadoEm: serverTimestamp()
