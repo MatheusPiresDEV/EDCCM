@@ -277,6 +277,7 @@ header {
   display: flex;
   align-items: center;
   gap: 10px;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .nav-btn {
@@ -1237,14 +1238,22 @@ main, header, #sec-auth, #lockscreen {
     border: 1px solid var(--line);
     border-radius: 16px;
     box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateY(-8px);
+    z-index: 1200;
+    max-height: 70vh;
+    overflow-y: auto;
   }
 
   .nav-menu.is-open {
     display: flex;
+    opacity: 1;
+    transform: translateY(0);
   }
 
   .nav-btn {
     width: 100%;
+    min-height: 44px;
   }
 
   .container {

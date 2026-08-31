@@ -470,6 +470,15 @@ const menuToggle = document.getElementById('menu-toggle');
 const navMenu = document.getElementById('nav-menu');
 
 if (menuToggle && navMenu) {
+  const atualizarEstadoMenu = () => {
+    const mobile = window.innerWidth <= 680;
+    if (!mobile) {
+      navMenu.classList.remove('is-open');
+      menuToggle.setAttribute('aria-expanded', 'false');
+      navMenu.style.display = '';
+    }
+  };
+
   menuToggle.addEventListener('click', () => {
     const isOpen = navMenu.classList.toggle('is-open');
     menuToggle.setAttribute('aria-expanded', String(isOpen));
@@ -477,10 +486,15 @@ if (menuToggle && navMenu) {
 
   navMenu.querySelectorAll('.nav-btn').forEach((button) => {
     button.addEventListener('click', () => {
-      navMenu.classList.remove('is-open');
-      menuToggle.setAttribute('aria-expanded', 'false');
+      if (window.innerWidth <= 680) {
+        navMenu.classList.remove('is-open');
+        menuToggle.setAttribute('aria-expanded', 'false');
+      }
     });
   });
+
+  window.addEventListener('resize', atualizarEstadoMenu);
+  atualizarEstadoMenu();
 }
 
 document.getElementById('btn-toggle-pass').addEventListener('click', () => {
