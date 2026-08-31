@@ -93,16 +93,25 @@
         </button>
 
         <nav class="nav-menu" id="nav-menu">
-            <button class="nav-btn" onclick="navegarPara('sec-dashboard')">
+            <button class="nav-btn active" data-target="sec-dashboard" onclick="navegarPara('sec-dashboard')">
                 <span class="nav-text">Álbuns</span>
             </button>
-            <button class="nav-btn btn-destaque" onclick="prepararNovoAlbum()">
+            <button class="nav-btn btn-destaque" data-target="sec-dashboard" onclick="prepararNovoAlbum()">
                 <span class="nav-text">Novo Álbum</span>
             </button>
-            <button class="nav-btn" onclick="navegarPara('sec-estatisticas')">
+            <button class="nav-btn" data-target="sec-top5" onclick="navegarPara('sec-top5')">
+                <span class="nav-text">Top 5</span>
+            </button>
+            <button class="nav-btn" data-target="sec-viagens" onclick="navegarPara('sec-viagens')">
+                <span class="nav-text">Viagens</span>
+            </button>
+            <button class="nav-btn" data-target="sec-observacoes" onclick="navegarPara('sec-observacoes')">
+                <span class="nav-text">Observações</span>
+            </button>
+            <button class="nav-btn" data-target="sec-estatisticas" onclick="navegarPara('sec-estatisticas')">
                 <span class="nav-text">Estatísticas</span>
             </button>
-            <button id="btn-logout" class="nav-btn btn-perigo">
+            <button id="btn-logout" class="nav-btn btn-perigo" data-target="sec-dashboard">
                 <span class="nav-text">Sair</span>
             </button>
         </nav>
@@ -230,6 +239,115 @@
         </section>
 
         <!-- TELA 4: ESTATÍSTICAS -->
+        <section id="sec-top5" class="tela escondido">
+            <div class="secao-cabecalho">
+                <h2>Top 5</h2>
+                <button id="btn-novo-top5" class="btn-primario btn-sm">Novo Top 5</button>
+            </div>
+
+            <div class="painel-filtros top5-filtros">
+                <div class="filtro-item busca-box">
+                    <input type="text" id="filtro-top5-busca" placeholder="Buscar Top 5 ou item..." oninput="aplicarFiltrosTop5()">
+                </div>
+
+                <div class="filtro-item select-box">
+                    <select id="filtro-top5-ordem" onchange="aplicarFiltrosTop5()">
+                        <option value="novo">Mais Recentes</option>
+                        <option value="antigo">Mais Antigos</option>
+                        <option value="titulo">Título (A-Z)</option>
+                    </select>
+                </div>
+            </div>
+
+            <form id="form-top5" class="glass-form">
+                <input type="hidden" id="top5-id">
+                <div class="grupo-campo">
+                    <label for="top5-titulo">Título do tema</label>
+                    <input type="text" id="top5-titulo" placeholder="Ex: Melhores músicas de rock" required>
+                </div>
+
+                <div class="top5-grid">
+                    <div class="top5-item">
+                        <label for="top5-item-1">1º lugar</label>
+                        <input type="text" id="top5-item-1" placeholder="Item nº 1" required>
+                    </div>
+                    <div class="top5-item">
+                        <label for="top5-item-2">2º lugar</label>
+                        <input type="text" id="top5-item-2" placeholder="Item nº 2" required>
+                    </div>
+                    <div class="top5-item">
+                        <label for="top5-item-3">3º lugar</label>
+                        <input type="text" id="top5-item-3" placeholder="Item nº 3" required>
+                    </div>
+                    <div class="top5-item">
+                        <label for="top5-item-4">4º lugar</label>
+                        <input type="text" id="top5-item-4" placeholder="Item nº 4" required>
+                    </div>
+                    <div class="top5-item">
+                        <label for="top5-item-5">5º lugar</label>
+                        <input type="text" id="top5-item-5" placeholder="Item nº 5" required>
+                    </div>
+                </div>
+
+                <div class="form-acoes">
+                    <button type="submit" class="btn-sucesso">Salvar Top 5</button>
+                    <button type="button" id="btn-cancelar-top5" class="btn-secundario">Cancelar</button>
+                </div>
+            </form>
+
+            <div id="lista-top5" class="cards-grid"></div>
+        </section>
+
+        <section id="sec-viagens" class="tela escondido">
+            <div class="secao-cabecalho">
+                <h2>Viagens</h2>
+                <button id="btn-nova-viagem" class="btn-primario btn-sm">Nova Viagem</button>
+            </div>
+
+            <form id="form-viagem" class="glass-form">
+                <input type="hidden" id="viagem-id">
+
+                <div class="grupo-campo">
+                    <label for="viagem-titulo">Nome da viagem</label>
+                    <input type="text" id="viagem-titulo" placeholder="Ex: Viagem para o Rio de Janeiro" required>
+                </div>
+
+                <div class="form-acoes">
+                    <button type="submit" class="btn-sucesso">Salvar viagem</button>
+                    <button type="button" id="btn-cancelar-viagem" class="btn-secundario">Cancelar</button>
+                </div>
+            </form>
+
+            <div id="lista-viagens" class="cards-grid"></div>
+        </section>
+
+        <section id="sec-observacoes" class="tela escondido">
+            <div class="secao-cabecalho">
+                <h2>Observações</h2>
+                <button id="btn-nova-observacao" class="btn-primario btn-sm">Nova Anotação</button>
+            </div>
+
+            <form id="form-observacao" class="glass-form">
+                <input type="hidden" id="obs-id">
+                <div class="grupo-campo">
+                    <label for="obs-titulo">Título</label>
+                    <input type="text" id="obs-titulo" placeholder="Ex: Ideias para o projeto" required>
+                </div>
+
+                <div class="grupo-campo">
+                    <label for="obs-conteudo">Conteúdo</label>
+                    <textarea id="obs-conteudo" rows="5" placeholder="Escreva sua anotação..." required></textarea>
+                </div>
+
+                <div class="form-acoes">
+                    <button type="submit" class="btn-sucesso">Salvar anotação</button>
+                    <button type="button" id="btn-cancelar-observacao" class="btn-secundario">Cancelar</button>
+                </div>
+            </form>
+
+            <div id="lista-observacoes" class="cards-grid notas-grid"></div>
+        </section>
+
         <section id="sec-estatisticas" class="tela escondido">
             <div class="secao-cabecalho">
                 <h2>Painel de Estatísticas</h2>
@@ -349,6 +467,30 @@
                         <ul id="modal-lista-faixas" class="lista-faixas-view"></ul>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-top5-historico" class="modal-overlay escondido" onclick="fecharModalTop5(false, event)">
+        <div class="modal-conteudo">
+            <div class="modal-cabecalho">
+                <h3>Histórico de Alterações</h3>
+                <button class="btn-fechar" onclick="fecharModalTop5(true)">X</button>
+            </div>
+            <div class="modal-corpo">
+                <div id="top5-historico-conteudo" class="historico-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-obs-historico" class="modal-overlay escondido" onclick="fecharModalObsHistorico(false, event)">
+        <div class="modal-conteudo">
+            <div class="modal-cabecalho">
+                <h3>Histórico de Revisões</h3>
+                <button class="btn-fechar" onclick="fecharModalObsHistorico(true)">X</button>
+            </div>
+            <div class="modal-corpo">
+                <div id="obs-historico-conteudo" class="historico-list"></div>
             </div>
         </div>
     </div>

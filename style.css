@@ -285,6 +285,19 @@ header {
   color: var(--text);
   padding: 10px 14px;
   font-weight: 600;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.nav-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(96, 165, 250, 0.6);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.nav-btn.active {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.18), rgba(59, 130, 246, 0.18));
+  border-color: rgba(34, 197, 94, 0.5);
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.2);
 }
 
 .btn-destaque {
@@ -351,6 +364,10 @@ header {
   grid-template-columns: 2fr 1fr 1.3fr;
   gap: 12px;
   margin-bottom: 20px;
+}
+
+.top5-filtros {
+  grid-template-columns: 2fr 1fr;
 }
 
 .filtro-item {
@@ -649,6 +666,206 @@ header {
 }
 
 /* Layout em 1 coluna para dar largura total a cada gráfico */
+.glass-form {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(17, 24, 39, 0.78));
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+#form-top5 input {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  color: var(--text);
+  min-height: 48px;
+  padding: 14px 16px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#form-top5 input:focus {
+  border-color: rgba(34, 197, 94, 0.6);
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+}
+
+.top5-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.top5-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.top5-item label {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 18px;
+}
+
+.top5-card,
+.viagem-card,
+.nota-card {
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.viagem-card.viagem-feita {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.viagem-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.viagem-status-row input {
+  width: 18px;
+  height: 18px;
+}
+
+.viagem-status-data {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.top5-card h3,
+.viagem-card h3,
+.nota-card h3 {
+  font-size: 1.25rem;
+}
+
+.top5-card .top5-lista,
+.nota-card .nota-conteudo,
+.viagem-card .lista-tarefas-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.top5-rank {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(148, 163, 184, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.top5-rank span:first-child {
+  font-weight: 700;
+  color: #bfdbfe;
+}
+
+.lista-tarefas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tarefa-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.tarefa-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(148, 163, 184, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.tarefa-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+
+.tarefa-item span {
+  flex: 1;
+}
+
+.tarefa-item.concluida span {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+
+.badge-duracao {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.notas-grid {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.nota-card {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.8), rgba(17, 24, 39, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nota-card .nota-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.historico-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.historico-item {
+  padding: 12px 14px;
+  background: rgba(148, 163, 184, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.historico-item small {
+  display: block;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
 .grid-graficos {
   display: flex;
   flex-direction: column;
@@ -767,6 +984,23 @@ header {
   white-space: pre-wrap;
 }
 
+#modal-top5-historico .modal-conteudo {
+  width: min(100%, 620px);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.35);
+}
+
+#modal-top5-historico .historico-item {
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+#top5-historico-conteudo {
+  gap: 12px;
+}
+
 .grid-detalhes {
   display: grid;
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
@@ -824,13 +1058,47 @@ header {
   border-radius: 10px;
 }
 
+.wallpaper-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: brightness(0.7) saturate(1.1);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
 #canvas-bg {
   position: fixed;
   inset: 0;
   width: 100vw;
   height: 100vh;
-  z-index: -1;
+  z-index: 0;
   pointer-events: none;
+}
+
+body {
+  position: relative;
+  background: transparent;
+}
+
+main, header, #sec-auth, #lockscreen {
+  position: relative;
+  z-index: 2;
+}
+
+#canvas-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -2;
+  pointer-events: none;
+  opacity: 1;
+  display: block;
+  background: transparent;
 }
 
 #lockscreen {
@@ -841,17 +1109,21 @@ header {
   flex-direction: column;
   justify-content: space-between;
   padding: 40px 20px 30px;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.24), rgba(2, 6, 23, 0.5));
   background-size: cover;
   background-position: center;
+  background-repeat: no-repeat;
   color: #fff;
   text-shadow: 0 3px 16px rgba(0, 0, 0, 0.7);
-  transition: transform 0.55s ease, opacity 0.55s ease;
+  transition: transform 0.55s ease, opacity 0.55s ease, filter 0.55s ease;
   cursor: pointer;
+  filter: blur(0px) brightness(1);
 }
 
 #lockscreen.deslizar-up {
   transform: translateY(-100%);
   opacity: 0;
+  filter: blur(12px) brightness(0.7) !important;
   pointer-events: none;
 }
 

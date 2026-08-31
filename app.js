@@ -3,7 +3,7 @@ import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut 
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
-  getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc 
+  getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot 
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -76,10 +76,9 @@ const FRASES = [
 
 // IMAGENS DA PASTA ASSETS PARA O LOCKSCREEN
 const IMAGENS_LOCKSCREEN = [
-  'assets/paisagem1.jpg',
-  'assets/paisagem2.jpg',
-  'assets/paisagem3.jpg',
-  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80'
+  'assets/andjustice.jpg',
+  'assets/images (2).jfif',
+  'assets/yh43bx8tdof21.jpg'
 ];
 
 // LÓGICA DO RELÓGIO E TELA DE BLOQUEIO
@@ -98,23 +97,84 @@ setInterval(atualizarRelogioLockscreen, 1000);
 atualizarRelogioLockscreen();
 
 window.desbloquearTela = function() {
-  document.getElementById('lockscreen').classList.add('deslizar-up');
+  const lockscreen = document.getElementById('lockscreen');
+  const auth = document.getElementById('sec-auth');
+
+  if (auth) {
+    auth.classList.remove('escondido');
+  }
+
+  document.querySelectorAll('.tela').forEach((tela) => {
+    if (tela.id !== 'sec-auth') {
+      tela.classList.add('escondido');
+    }
+  });
+
+  if (lockscreen) {
+    lockscreen.classList.remove('escondido');
+    lockscreen.classList.add('deslizar-up');
+    lockscreen.style.backgroundImage = 'none';
+    lockscreen.style.background = 'linear-gradient(180deg, rgba(2, 6, 23, 0.24), rgba(2, 6, 23, 0.5))';
+    lockscreen.style.filter = 'blur(12px) brightness(0.7)';
+    lockscreen.style.opacity = '0.25';
+  }
 };
 
 window.bloquearTela = function() {
   sortearFraseELockscreen();
-  document.getElementById('lockscreen').classList.remove('deslizar-up');
+  const lockscreen = document.getElementById('lockscreen');
+  const auth = document.getElementById('sec-auth');
+  const mainHeader = document.getElementById('main-header');
+
+  if (auth) {
+    auth.classList.add('escondido');
+  }
+
+  if (mainHeader) {
+    mainHeader.classList.add('escondido');
+  }
+
+  document.querySelectorAll('.tela').forEach((tela) => {
+    if (tela.id !== 'sec-auth' && tela.id !== 'lockscreen') {
+      tela.classList.add('escondido');
+    }
+  });
+
+  if (lockscreen) {
+    lockscreen.classList.remove('deslizar-up');
+    lockscreen.classList.remove('escondido');
+    lockscreen.style.filter = 'blur(0px) brightness(1)';
+    lockscreen.style.opacity = '1';
+    lockscreen.style.pointerEvents = 'auto';
+    lockscreen.style.display = 'flex';
+  }
 };
+
+function mostrarWallpaperPrincipal() {
+  const lockscreen = document.getElementById('lockscreen');
+  if (lockscreen) {
+    lockscreen.classList.add('deslizar-up');
+    lockscreen.style.filter = 'blur(0px) brightness(1)';
+    lockscreen.style.opacity = '0';
+    lockscreen.style.pointerEvents = 'none';
+  }
+}
 
 function sortearFraseELockscreen() {
   const f = FRASES[Math.floor(Math.random() * FRASES.length)];
+  const lockscreen = document.getElementById('lockscreen');
+
+  if (!lockscreen) return;
+
   document.getElementById('lock-quote-texto').innerText = `"${f.quote}"`;
   document.getElementById('lock-quote-autor').innerText = `- ${f.autor}`;
 
-  const img = IMAGENS_LOCKSCREEN[Math.floor(Math.random() * IMAGENS_LOCKSCREEN.length)];
-  document.getElementById('lockscreen').style.backgroundImage = `url('${img}')`;
+  lockscreen.style.backgroundImage = 'none';
+  lockscreen.style.background = 'linear-gradient(180deg, rgba(2, 6, 23, 0.24), rgba(2, 6, 23, 0.5))';
+  lockscreen.style.filter = 'blur(0px) brightness(1)';
 }
 sortearFraseELockscreen();
+bloquearTela();
 
 // WALLPAPER REATIVO AO HORÁRIO E INTERATIVO (CANVAS)
 const canvas = document.getElementById('canvas-bg');
@@ -134,62 +194,222 @@ window.addEventListener('resize', redimensionarCanvas);
 redimensionarCanvas();
 
 // PARTÍCULAS INTERATIVAS DO WALLPAPER
-const particulas = Array.from({ length: 60 }, () => ({
+const particulas = Array.from({ length: 90 }, () => ({
   x: Math.random() * window.innerWidth,
   y: Math.random() * window.innerHeight,
-  raio: Math.random() * 2 + 1,
-  vx: (Math.random() - 0.5) * 0.5,
-  vy: (Math.random() - 0.5) * 0.5
+  raio: Math.random() * 2.4 + 0.8,
+  vx: (Math.random() - 0.5) * 0.6,
+  vy: (Math.random() - 0.5) * 0.6,
+  brilho: Math.random() * 0.8 + 0.2
 }));
 
+function interpolar(inicio, fim, fator) {
+  return inicio + (fim - inicio) * fator;
+}
+
+function obterCenaDoDia() {
+  const agora = new Date();
+  const hora = agora.getHours() + agora.getMinutes() / 60;
+
+  if (hora >= 5 && hora < 8) return 'nascer';
+  if (hora >= 8 && hora < 16) return 'dia';
+  if (hora >= 16 && hora < 20) return 'por-do-sol';
+  return 'noite';
+}
+
 function animarFundo() {
-  const hora = new Date().getHours();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const agora = new Date();
+  const hora = agora.getHours() + agora.getMinutes() / 60;
+  const cena = obterCenaDoDia();
+  const larg = canvas.width;
+  const alt = canvas.height;
+  const pontoFugaX = larg * (0.5 + (mouse.x / larg - 0.5) * 0.18);
+  const pontoFugaY = alt * (0.44 + (mouse.y / alt - 0.5) * 0.1);
 
-  let corFundo1, corFundo2, corParticula;
+  ctx.clearRect(0, 0, larg, alt);
 
-  // Três horários: Manhã (6h-12h), Tarde (12h-18h), Noite (18h-6h)
-  if (hora >= 6 && hora < 12) {
-    // Manhã (Amanhecer Dourado / Azul Claro)
-    corFundo1 = "#1e3c72";
-    corFundo2 = "#2a5298";
-    corParticula = "rgba(255, 223, 186, 0.6)";
-  } else if (hora >= 12 && hora < 18) {
-    // Tarde (Pôr do Sol Roxo / Laranja)
-    corFundo1 = "#2c3e50";
-    corFundo2 = "#fd746c";
-    corParticula = "rgba(255, 255, 255, 0.5)";
+  let topo1, topo2, meio1, meio2, solCor, solX, solY, solRaio, horizonte, nuvem, estrela, montanha1, montanha2, montanha3;
+
+  if (cena === 'nascer') {
+    topo1 = '#081f3f';
+    topo2 = '#2d5b88';
+    meio1 = '#f7b267';
+    meio2 = '#f9d976';
+    solCor = '#fff2b3';
+    solX = larg * 0.3 + (hora - 5) * larg * 0.1;
+    solY = alt * (0.78 - (hora - 5) * 0.1);
+    solRaio = 48;
+    horizonte = '#f4c77d';
+    nuvem = 'rgba(255, 245, 220, 0.14)';
+    estrela = 'rgba(255, 239, 197, 0.18)';
+    montanha1 = '#1d3557';
+    montanha2 = '#0f2542';
+    montanha3 = '#0b1b2f';
+  } else if (cena === 'dia') {
+    topo1 = '#62b6ff';
+    topo2 = '#d7f1ff';
+    meio1 = '#8bd4ff';
+    meio2 = '#f6fbff';
+    solCor = '#ffe38a';
+    solX = larg * (0.18 + (hora - 8) / 8 * 0.64);
+    solY = alt * 0.28;
+    solRaio = 42;
+    horizonte = '#a5d8ff';
+    nuvem = 'rgba(255, 255, 255, 0.18)';
+    estrela = 'rgba(255, 255, 255, 0.06)';
+    montanha1 = '#4a6f8a';
+    montanha2 = '#3a536e';
+    montanha3 = '#243a4d';
+  } else if (cena === 'por-do-sol') {
+    topo1 = '#2d1b4a';
+    topo2 = '#ef6f6c';
+    meio1 = '#ff9f43';
+    meio2 = '#ffd166';
+    solCor = '#ffcf70';
+    solX = larg * (0.72 - (hora - 16) / 4 * 0.42);
+    solY = alt * (0.34 + (hora - 16) / 4 * 0.14);
+    solRaio = 54;
+    horizonte = '#ff8a5b';
+    nuvem = 'rgba(255, 214, 160, 0.14)';
+    estrela = 'rgba(255, 255, 255, 0.08)';
+    montanha1 = '#4c3259';
+    montanha2 = '#2d2240';
+    montanha3 = '#1b1a2f';
   } else {
-    // Noite (Céu Noturno Estrelado Profundo)
-    corFundo1 = "#0f2027";
-    corFundo2 = "#203a43";
-    corParticula = "rgba(29, 185, 84, 0.7)";
+    topo1 = '#020b1a';
+    topo2 = '#112942';
+    meio1 = '#1f3a5f';
+    meio2 = '#3f5d8a';
+    solCor = '#dfe9ff';
+    solX = larg * 0.7;
+    solY = alt * 0.32;
+    solRaio = 38;
+    horizonte = '#7e9cc7';
+    nuvem = 'rgba(180, 210, 255, 0.08)';
+    estrela = 'rgba(255, 255, 255, 0.45)';
+    montanha1 = '#13263f';
+    montanha2 = '#0e1f34';
+    montanha3 = '#081523';
   }
 
-  // Gradiente de Fundo Reativo ao Mouse
-  const gradiente = ctx.createRadialGradient(
-    mouse.x, mouse.y, 100, 
-    canvas.width / 2, canvas.height / 2, canvas.width
-  );
-  gradiente.addColorStop(0, corFundo2);
-  gradiente.addColorStop(1, corFundo1);
-
+  const gradiente = ctx.createLinearGradient(0, 0, 0, alt);
+  gradiente.addColorStop(0, topo1);
+  gradiente.addColorStop(0.5, meio1);
+  gradiente.addColorStop(1, topo2);
   ctx.fillStyle = gradiente;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, larg, alt);
 
-  // Renderiza Partículas Interativas
-  particulas.forEach(p => {
-    p.x += p.vx;
-    p.y += p.vy;
+  const gradienteSol = ctx.createRadialGradient(solX, solY, 10, solX, solY, solRaio * 3.5);
+  gradienteSol.addColorStop(0, 'rgba(255,255,255,0.9)');
+  gradienteSol.addColorStop(0.18, solCor);
+  gradienteSol.addColorStop(0.55, 'rgba(255,170,90,0.25)');
+  gradienteSol.addColorStop(1, 'rgba(255,170,90,0)');
+  ctx.fillStyle = gradienteSol;
+  ctx.beginPath();
+  ctx.arc(solX, solY, solRaio * 3.5, 0, Math.PI * 2);
+  ctx.fill();
 
-    if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-    if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+  ctx.fillStyle = solCor;
+  ctx.beginPath();
+  ctx.arc(solX, solY, solRaio, 0, Math.PI * 2);
+  ctx.fill();
 
+  if (cena === 'noite') {
+    particulas.forEach((p, index) => {
+      const estrelaX = (p.x + (index * 17)) % larg;
+      const estrelaY = (p.y + (index * 13)) % (alt * 0.7);
+      ctx.fillStyle = `rgba(255,255,255,${p.brilho})`;
+      ctx.beginPath();
+      ctx.arc(estrelaX, estrelaY, p.raio, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  for (let i = 0; i < 6; i++) {
+    const desloc = (Date.now() * 0.02 + i * 160) % (larg + 260);
+    const nuvemY = alt * (0.18 + i * 0.05) + (mouse.y - alt / 2) * 0.03;
+    ctx.fillStyle = nuvem;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.raio, 0, Math.PI * 2);
-    ctx.fillStyle = corParticula;
+    ctx.arc(desloc - 120, nuvemY, 42, 0, Math.PI * 2);
+    ctx.arc(desloc - 70, nuvemY - 18, 50, 0, Math.PI * 2);
+    ctx.arc(desloc - 20, nuvemY, 58, 0, Math.PI * 2);
+    ctx.arc(desloc + 40, nuvemY - 12, 48, 0, Math.PI * 2);
     ctx.fill();
-  });
+  }
+
+  const horizonteBase = alt * 0.72;
+  ctx.beginPath();
+  ctx.moveTo(0, alt);
+  ctx.lineTo(0, horizonteBase);
+  ctx.lineTo(larg * 0.15, horizonteBase - 40);
+  ctx.lineTo(larg * 0.32, horizonteBase + 5);
+  ctx.lineTo(larg * 0.45, horizonteBase - 60);
+  ctx.lineTo(larg * 0.62, horizonteBase + 8);
+  ctx.lineTo(larg * 0.8, horizonteBase - 45);
+  ctx.lineTo(larg, horizonteBase);
+  ctx.lineTo(larg, alt);
+  ctx.closePath();
+  ctx.fillStyle = montanha1;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(0, alt);
+  ctx.lineTo(0, horizonteBase + 10);
+  ctx.lineTo(larg * 0.2, horizonteBase - 20);
+  ctx.lineTo(larg * 0.36, horizonteBase + 16);
+  ctx.lineTo(larg * 0.52, horizonteBase - 80);
+  ctx.lineTo(larg * 0.7, horizonteBase + 28);
+  ctx.lineTo(larg * 0.87, horizonteBase - 30);
+  ctx.lineTo(larg, horizonteBase + 14);
+  ctx.lineTo(larg, alt);
+  ctx.closePath();
+  ctx.fillStyle = montanha2;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(0, alt);
+  ctx.lineTo(0, horizonteBase + 80);
+  ctx.lineTo(larg * 0.14, horizonteBase + 50);
+  ctx.lineTo(larg * 0.26, horizonteBase + 95);
+  ctx.lineTo(larg * 0.45, horizonteBase + 40);
+  ctx.lineTo(larg * 0.64, horizonteBase + 110);
+  ctx.lineTo(larg * 0.82, horizonteBase + 46);
+  ctx.lineTo(larg, horizonteBase + 75);
+  ctx.lineTo(larg, alt);
+  ctx.closePath();
+  ctx.fillStyle = montanha3;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(0, alt);
+  ctx.lineTo(0, alt * 0.9);
+  ctx.lineTo(larg * 0.25, alt * 0.86);
+  ctx.lineTo(larg * 0.5, alt * 0.9);
+  ctx.lineTo(larg * 0.75, alt * 0.88);
+  ctx.lineTo(larg, alt * 0.92);
+  ctx.lineTo(larg, alt);
+  ctx.closePath();
+  ctx.fillStyle = horizonte;
+  ctx.globalAlpha = 0.75;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  const linhaFuga = ctx.createLinearGradient(pontoFugaX - 120, pontoFugaY, pontoFugaX + 120, pontoFugaY);
+  linhaFuga.addColorStop(0, 'rgba(255,255,255,0)');
+  linhaFuga.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+  linhaFuga.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.strokeStyle = linhaFuga;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, pontoFugaY);
+  ctx.lineTo(larg, pontoFugaY);
+  ctx.stroke();
+
+  const linhaHorizonte = ctx.createLinearGradient(0, horizonteBase, 0, alt);
+  linhaHorizonte.addColorStop(0, 'rgba(255,255,255,0)');
+  linhaHorizonte.addColorStop(1, 'rgba(12, 18, 30, 0.38)');
+  ctx.fillStyle = linhaHorizonte;
+  ctx.fillRect(0, horizonteBase, larg, alt - horizonteBase);
 
   requestAnimationFrame(animarFundo);
 }
@@ -215,6 +435,10 @@ let imagemBase64Temp = "";
 let todosOsAlbuns = [];
 let albunsFiltrados = [];
 let paginaAtual = 1;
+let top5ListaCompleta = [];
+let top5Unsubscribe = null;
+let viagensUnsubscribe = null;
+let observacoesUnsubscribe = null;
 const ITENS_POR_PAGINA = 12;
 
 function mostrarToast(mensagem, tipo = 'sucesso') {
@@ -227,6 +451,19 @@ function mostrarToast(mensagem, tipo = 'sucesso') {
 
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => toast.classList.add('escondido'), 3000);
+}
+
+function obterUsuarioAtivo() {
+  return auth.currentUser || usuarioAtual;
+}
+
+function validarUsuarioParaSalvar() {
+  const usuarioAtivo = obterUsuarioAtivo();
+  if (!usuarioAtivo) {
+    mostrarToast('Faça login antes de salvar.', 'erro');
+    return false;
+  }
+  return true;
 }
 
 const menuToggle = document.getElementById('menu-toggle');
@@ -258,6 +495,21 @@ window.navegarPara = function(idTela) {
   document.querySelectorAll('.tela').forEach(t => t.classList.add('escondido'));
   const telaDestino = document.getElementById(idTela);
   if (telaDestino) telaDestino.classList.remove('escondido');
+
+  const mapeamento = {
+    'sec-dashboard': 'sec-dashboard',
+    'sec-novo-album': 'sec-dashboard',
+    'sec-top5': 'sec-top5',
+    'sec-viagens': 'sec-viagens',
+    'sec-observacoes': 'sec-observacoes',
+    'sec-estatisticas': 'sec-estatisticas'
+  };
+
+  document.querySelectorAll('.nav-btn').forEach((button) => {
+    const alvo = button.getAttribute('data-target');
+    button.classList.toggle('active', alvo === mapeamento[idTela]);
+    button.setAttribute('aria-current', alvo === mapeamento[idTela] ? 'page' : 'false');
+  });
 
   if (navMenu && menuToggle) {
     navMenu.classList.remove('is-open');
@@ -305,17 +557,582 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 });
 
 onAuthStateChanged(auth, (user) => {
+  if (top5Unsubscribe) top5Unsubscribe();
+  if (viagensUnsubscribe) viagensUnsubscribe();
+  if (observacoesUnsubscribe) observacoesUnsubscribe();
+
   if (user) {
     usuarioAtual = user;
     document.getElementById('main-header').classList.remove('escondido');
-    desbloquearTela();
+    mostrarWallpaperPrincipal();
+    subscribeTop5();
+    subscribeViagens();
+    subscribeObservacoes();
     navegarPara('sec-dashboard');
   } else {
     usuarioAtual = null;
-    document.getElementById('main-header').classList.add('escondido');
-    navegarPara('sec-auth');
+    const mainHeader = document.getElementById('main-header');
+    if (mainHeader) mainHeader.classList.add('escondido');
+
+    bloquearTela();
   }
 });
+
+function formatarDataHora(valor) {
+  if (!valor) return 'Sem data';
+  const data = valor.toDate ? valor.toDate() : new Date(valor);
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(data);
+}
+
+function criarHistorico(alteracao) {
+  return {
+    data: new Date(),
+    alteracao
+  };
+}
+
+function calcularTempoConclusao(criadoEm, concluidoEm) {
+  if (!criadoEm || !concluidoEm) return 'Pendente';
+
+  const inicio = criadoEm.toDate ? criadoEm.toDate() : new Date(criadoEm);
+  const fim = concluidoEm.toDate ? concluidoEm.toDate() : new Date(concluidoEm);
+  const diffMs = Math.max(0, fim.getTime() - inicio.getTime());
+
+  const segundos = Math.floor(diffMs / 1000);
+  const minutos = Math.floor(segundos / 60);
+  const horas = Math.floor(minutos / 60);
+  const dias = Math.floor(horas / 24);
+
+  const restanteHoras = horas % 24;
+  const restanteMinutos = minutos % 60;
+
+  const partes = [];
+  if (dias > 0) partes.push(`${dias} dia${dias > 1 ? 's' : ''}`);
+  if (restanteHoras > 0) partes.push(`${restanteHoras} hora${restanteHoras > 1 ? 's' : ''}`);
+  if (restanteMinutos > 0 && dias === 0) partes.push(`${restanteMinutos} min`);
+
+  if (partes.length === 0) return 'Concluído em menos de 1 minuto';
+  return `Concluído em ${partes.join(' e ')}`;
+}
+
+// TOP 5
+function subscribeTop5() {
+  if (!usuarioAtual) return;
+
+  const q = query(
+    collection(db, 'viagens'),
+    where('categoria', '==', 'top5'),
+    where('userId', '==', usuarioAtual.uid)
+  );
+
+  if (top5Unsubscribe) top5Unsubscribe();
+
+  top5Unsubscribe = onSnapshot(q, (snapshot) => {
+    const lista = [];
+    snapshot.forEach((item) => lista.push({ id: item.id, ...item.data() }));
+    top5ListaCompleta = lista;
+    aplicarFiltrosTop5();
+  });
+}
+
+window.aplicarFiltrosTop5 = function() {
+  const termo = document.getElementById('filtro-top5-busca')?.value.toLowerCase().trim() || '';
+  const ordem = document.getElementById('filtro-top5-ordem')?.value || 'novo';
+  let lista = [...top5ListaCompleta];
+
+  if (termo) {
+    lista = lista.filter((top) => {
+      const titulo = (top.titulo || '').toLowerCase();
+      const itens = Array.isArray(top.itens) ? top.itens.join(' ').toLowerCase() : '';
+      return titulo.includes(termo) || itens.includes(termo);
+    });
+  }
+
+  lista.sort((a, b) => {
+    const aa = a.atualizadoEm && a.atualizadoEm.toDate ? a.atualizadoEm.toDate() : new Date(a.atualizadoEm || 0);
+    const bb = b.atualizadoEm && b.atualizadoEm.toDate ? b.atualizadoEm.toDate() : new Date(b.atualizadoEm || 0);
+
+    if (ordem === 'antigo') return aa - bb;
+    if (ordem === 'titulo') return (a.titulo || '').localeCompare(b.titulo || '');
+    return bb - aa;
+  });
+
+  const container = document.getElementById('lista-top5');
+  if (!container) return;
+
+  if (!lista.length) {
+    container.innerHTML = '<p class="empty-state">Nenhum Top 5 cadastrado.</p>';
+    return;
+  }
+
+  container.innerHTML = lista.map((top) => {
+    const itens = Array.isArray(top.itens) ? top.itens : [];
+    return `
+      <div class="top5-card">
+        <div class="card-cabecalho">
+          <h3>${top.titulo || 'Top 5'}</h3>
+        </div>
+        <div class="top5-lista">
+          ${itens.map((item, index) => `
+            <div class="top5-rank">
+              <span>${index + 1}º</span>
+              <span>${item}</span>
+            </div>
+          `).join('')}
+        </div>
+        <div class="card-datas">
+          Criado: ${formatarDataHora(top.criadoEm)}<br>
+          Atualizado: ${formatarDataHora(top.atualizadoEm)}
+        </div>
+        <div class="card-acoes">
+          <button type="button" class="btn-alerta" data-top5-editar="${top.id}">Editar</button>
+          <button type="button" class="btn-perigo" data-top5-excluir="${top.id}">Excluir</button>
+          <button type="button" class="btn-obs" data-top5-historico="${top.id}">Histórico</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+};
+
+document.getElementById('btn-novo-top5').addEventListener('click', () => {
+  document.getElementById('form-top5').reset();
+  document.getElementById('top5-id').value = '';
+  document.getElementById('top5-titulo').focus();
+});
+
+document.getElementById('btn-cancelar-top5').addEventListener('click', () => {
+  document.getElementById('form-top5').reset();
+  document.getElementById('top5-id').value = '';
+});
+
+document.getElementById('form-top5').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!validarUsuarioParaSalvar()) return;
+
+  const usuarioAtivo = obterUsuarioAtivo();
+  const id = document.getElementById('top5-id').value;
+  const titulo = document.getElementById('top5-titulo').value.trim();
+  const itens = Array.from({ length: 5 }, (_, index) => document.getElementById(`top5-item-${index + 1}`).value.trim());
+
+  if (!titulo || itens.some(item => !item)) {
+    return mostrarToast('Preencha todos os campos do Top 5!', 'erro');
+  }
+
+  try {
+    if (id) {
+      const docSnap = await getDoc(doc(db, 'viagens', id));
+      const antigo = docSnap.data() || {};
+      const mensagem = `Alteração em “${antigo.titulo || 'Top 5'}” para “${titulo}”. Itens atualizados.`;
+      const logsExistentes = Array.isArray(antigo.historicoLogs) ? antigo.historicoLogs : [];
+      await updateDoc(doc(db, 'viagens', id), {
+        titulo,
+        itens,
+        atualizadoEm: serverTimestamp(),
+        historicoLogs: [
+          ...logsExistentes,
+          {
+            data: new Date().toISOString(),
+            alteracao: mensagem
+          }
+        ]
+      });
+      mostrarToast('Top 5 atualizado!');
+    } else {
+      await addDoc(collection(db, 'viagens'), {
+        categoria: 'top5',
+        titulo,
+        itens,
+        userId: usuarioAtivo.uid,
+        realizado: false,
+        realizadaEm: null,
+        criadoEm: serverTimestamp(),
+        atualizadoEm: serverTimestamp(),
+        historicoLogs: [{
+          data: new Date().toISOString(),
+          alteracao: 'Top 5 criado.'
+        }]
+      });
+      mostrarToast('Top 5 salvo com sucesso!');
+    }
+
+    document.getElementById('form-top5').reset();
+    document.getElementById('top5-id').value = '';
+  } catch (erro) {
+    console.error('Erro ao salvar Top 5:', erro);
+    mostrarToast('Erro ao salvar o Top 5', 'erro');
+  }
+});
+
+document.getElementById('lista-top5').addEventListener('click', async (event) => {
+  const editarId = event.target.dataset.top5Editar;
+  const excluirId = event.target.dataset.top5Excluir;
+  const historicoId = event.target.dataset.top5Historico;
+
+  if (editarId) {
+    const docSnap = await getDoc(doc(db, 'viagens', editarId));
+    const dados = docSnap.data();
+    if (!dados) return;
+
+    document.getElementById('top5-id').value = editarId;
+    document.getElementById('top5-titulo').value = dados.titulo || '';
+    Array.from({ length: 5 }, (_, index) => index + 1).forEach((numero) => {
+      document.getElementById(`top5-item-${numero}`).value = (dados.itens && dados.itens[numero - 1]) || '';
+    });
+
+    document.getElementById('top5-titulo').focus();
+  }
+
+  if (excluirId) {
+    if (confirm('Deseja excluir este Top 5?')) {
+      await deleteDoc(doc(db, 'viagens', excluirId));
+      mostrarToast('Top 5 removido!');
+    }
+  }
+
+  if (historicoId) {
+    const docSnap = await getDoc(doc(db, 'viagens', historicoId));
+    const dados = docSnap.data() || {};
+    const logs = Array.isArray(dados.historicoLogs) ? dados.historicoLogs : [];
+    const container = document.getElementById('top5-historico-conteudo');
+    if (!container) return;
+    container.innerHTML = logs.length
+      ? logs.map(item => `<div class="historico-item"><small>${formatarDataHora(item.data)}</small><div>${item.alteracao || 'Sem descrição'}</div></div>`).join('')
+      : '<p>Sem histórico de alterações.</p>';
+    document.getElementById('modal-top5-historico').classList.remove('escondido');
+  }
+});
+
+window.fecharModalTop5 = function(forcar = false, evento = null) {
+  const modal = document.getElementById('modal-top5-historico');
+  if (!modal) return;
+  if (forcar || (evento && evento.target === modal)) modal.classList.add('escondido');
+};
+
+// VIAGENS
+function addLinhaTarefa(texto = '', concluida = false, criadoEm = null) {
+  const container = document.getElementById('container-viagem-tarefas');
+  const row = document.createElement('div');
+  row.className = 'tarefa-input-row';
+  row.innerHTML = `
+    <input type="text" value="${texto}" class="tarefa-input" placeholder="Ex: Comprar passagens" ${concluida ? 'readonly' : ''}>
+    <button type="button" class="btn-perigo btn-remove-tarefa">X</button>
+  `;
+
+  if (criadoEm) row.dataset.criadoEm = String(criadoEm);
+  if (concluida) row.dataset.concluida = 'true';
+  row.querySelector('.btn-remove-tarefa').addEventListener('click', () => row.remove());
+  container.appendChild(row);
+}
+
+function subscribeViagens() {
+  if (!usuarioAtual) return;
+
+  const q = query(collection(db, 'viagens'), where('userId', '==', usuarioAtual.uid));
+  if (viagensUnsubscribe) viagensUnsubscribe();
+
+  viagensUnsubscribe = onSnapshot(q, (snapshot) => {
+    const lista = [];
+    snapshot.forEach((item) => lista.push({ id: item.id, ...item.data() }));
+    lista.sort((a, b) => {
+      const aa = a.atualizadoEm && a.atualizadoEm.toDate ? a.atualizadoEm.toDate() : new Date(a.atualizadoEm || 0);
+      const bb = b.atualizadoEm && b.atualizadoEm.toDate ? b.atualizadoEm.toDate() : new Date(b.atualizadoEm || 0);
+      return bb - aa;
+    });
+
+    const container = document.getElementById('lista-viagens');
+    if (!container) return;
+    if (!lista.length) {
+      container.innerHTML = '<p class="empty-state">Nenhuma viagem cadastrada.</p>';
+      return;
+    }
+
+    container.innerHTML = lista.map((viagem) => {
+      const realizada = Boolean(viagem.realizada);
+      const marcadaEm = viagem.realizadaEm ? formatarDataHora(viagem.realizadaEm) : 'Ainda não marcada';
+
+      return `
+        <div class="viagem-card ${realizada ? 'viagem-feita' : ''}">
+          <div class="card-cabecalho">
+            <h3>${viagem.titulo || 'Viagem'}</h3>
+            <span class="badge-duracao ${realizada ? 'feito' : ''}">${realizada ? 'Concluída' : 'Pendente'}</span>
+          </div>
+
+          <label class="viagem-status-row">
+            <input type="checkbox" data-viagem-toggle="${viagem.id}" ${realizada ? 'checked' : ''}>
+            <span>Marcar como feita</span>
+          </label>
+
+          <div class="viagem-status-data">
+            ${realizada ? `Realizada em: ${marcadaEm}` : `Data da realização: ${marcadaEm}`}
+          </div>
+
+          <div class="card-datas">
+            Criado: ${formatarDataHora(viagem.criadoEm)}<br>
+            Atualizado: ${formatarDataHora(viagem.atualizadoEm)}
+          </div>
+          <div class="card-acoes">
+            <button type="button" class="btn-alerta" data-viagem-editar="${viagem.id}">Editar</button>
+            <button type="button" class="btn-perigo" data-viagem-excluir="${viagem.id}">Excluir</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  });
+}
+
+document.getElementById('btn-nova-viagem').addEventListener('click', () => {
+  document.getElementById('form-viagem').reset();
+  document.getElementById('viagem-id').value = '';
+  document.getElementById('viagem-titulo').focus();
+});
+
+document.getElementById('btn-cancelar-viagem').addEventListener('click', () => {
+  document.getElementById('form-viagem').reset();
+  document.getElementById('viagem-id').value = '';
+});
+
+document.getElementById('form-viagem').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!validarUsuarioParaSalvar()) return;
+
+  const usuarioAtivo = obterUsuarioAtivo();
+  const id = document.getElementById('viagem-id').value;
+  const titulo = document.getElementById('viagem-titulo').value.trim();
+
+  if (!titulo) {
+    return mostrarToast('Informe o nome da viagem.', 'erro');
+  }
+
+  try {
+    if (id) {
+      await updateDoc(doc(db, 'viagens', id), {
+        titulo,
+        atualizadoEm: serverTimestamp()
+      });
+      mostrarToast('Viagem atualizada!');
+    } else {
+      await addDoc(collection(db, 'viagens'), {
+        titulo,
+        userId: usuarioAtivo.uid,
+        realizada: false,
+        realizadaEm: null,
+        criadoEm: serverTimestamp(),
+        atualizadoEm: serverTimestamp()
+      });
+      mostrarToast('Viagem salva com sucesso!');
+    }
+
+    document.getElementById('form-viagem').reset();
+    document.getElementById('viagem-id').value = '';
+  } catch (erro) {
+    console.error('Erro ao salvar viagem:', erro);
+    mostrarToast('Erro ao salvar viagem.', 'erro');
+  }
+});
+
+document.getElementById('lista-viagens').addEventListener('click', async (event) => {
+  const editarId = event.target.dataset.viagemEditar;
+  const excluirId = event.target.dataset.viagemExcluir;
+
+  if (editarId) {
+    const docSnap = await getDoc(doc(db, 'viagens', editarId));
+    const dados = docSnap.data();
+    if (!dados) return;
+
+    document.getElementById('viagem-id').value = editarId;
+    document.getElementById('viagem-titulo').value = dados.titulo || '';
+    document.getElementById('viagem-titulo').focus();
+  }
+
+  if (excluirId) {
+    if (confirm('Deseja excluir esta viagem?')) {
+      await deleteDoc(doc(db, 'viagens', excluirId));
+      mostrarToast('Viagem removida!');
+    }
+  }
+});
+
+document.getElementById('lista-viagens').addEventListener('change', async (event) => {
+  const checkbox = event.target.closest('[data-viagem-toggle]');
+  if (!checkbox) return;
+
+  const viagemId = checkbox.dataset.viagemToggle;
+  const concluida = checkbox.checked;
+
+  await updateDoc(doc(db, 'viagens', viagemId), {
+    realizada: concluida,
+    realizadaEm: concluida ? serverTimestamp() : null,
+    atualizadoEm: serverTimestamp()
+  });
+
+  mostrarToast(concluida ? 'Viagem marcada como feita!' : 'Viagem reaberta.');
+});
+
+// OBSERVAÇÕES
+function subscribeObservacoes() {
+  if (!usuarioAtual) return;
+
+  const q = query(
+    collection(db, 'viagens'),
+    where('categoria', '==', 'observacao'),
+    where('userId', '==', usuarioAtual.uid)
+  );
+
+  if (observacoesUnsubscribe) observacoesUnsubscribe();
+
+  observacoesUnsubscribe = onSnapshot(q, (snapshot) => {
+    const lista = [];
+    snapshot.forEach((item) => lista.push({ id: item.id, ...item.data() }));
+    lista.sort((a, b) => {
+      const aa = a.atualizadoEm && a.atualizadoEm.toDate ? a.atualizadoEm.toDate() : new Date(a.atualizadoEm || 0);
+      const bb = b.atualizadoEm && b.atualizadoEm.toDate ? b.atualizadoEm.toDate() : new Date(b.atualizadoEm || 0);
+      return bb - aa;
+    });
+
+    const container = document.getElementById('lista-observacoes');
+    if (!container) return;
+    if (!lista.length) {
+      container.innerHTML = '<p class="empty-state">Nenhuma anotação cadastrada.</p>';
+      return;
+    }
+
+    container.innerHTML = lista.map((nota) => `
+      <div class="nota-card">
+        <h3>${nota.titulo || 'Sem título'}</h3>
+        <p class="nota-meta">Atualizado em ${formatarDataHora(nota.atualizadoEm)}</p>
+        <div class="nota-conteudo">
+          <p>${(nota.conteudo || '').replace(/\n/g, '<br>')}</p>
+        </div>
+        <div class="card-acoes">
+          <button type="button" class="btn-alerta" data-obs-editar="${nota.id}">Editar</button>
+          <button type="button" class="btn-perigo" data-obs-excluir="${nota.id}">Excluir</button>
+          <button type="button" class="btn-obs" data-obs-historico="${nota.id}">Histórico</button>
+        </div>
+      </div>
+    `).join('');
+  });
+}
+
+document.getElementById('btn-nova-observacao').addEventListener('click', () => {
+  document.getElementById('form-observacao').reset();
+  document.getElementById('obs-id').value = '';
+  document.getElementById('obs-titulo').focus();
+});
+
+document.getElementById('btn-cancelar-observacao').addEventListener('click', () => {
+  document.getElementById('form-observacao').reset();
+  document.getElementById('obs-id').value = '';
+});
+
+document.getElementById('form-observacao').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!validarUsuarioParaSalvar()) return;
+
+  const usuarioAtivo = obterUsuarioAtivo();
+  const id = document.getElementById('obs-id').value;
+  const titulo = document.getElementById('obs-titulo').value.trim();
+  const conteudo = document.getElementById('obs-conteudo').value.trim();
+
+  if (!titulo || !conteudo) {
+    return mostrarToast('Preencha título e conteúdo da anotação.', 'erro');
+  }
+
+  try {
+    if (id) {
+      const docSnap = await getDoc(doc(db, 'viagens', id));
+      const antiga = docSnap.data() || {};
+      const textoAnterior = antiga.conteudo || '';
+      const tituloAnterior = antiga.titulo || '';
+      const alteracao = `Título: ${tituloAnterior} -> ${titulo} | Conteúdo: ${textoAnterior} -> ${conteudo}`;
+      const logsExistentes = Array.isArray(antiga.historicoLogs) ? antiga.historicoLogs : [];
+      await updateDoc(doc(db, 'viagens', id), {
+        titulo,
+        conteudo,
+        atualizadoEm: serverTimestamp(),
+        historicoLogs: [
+          ...logsExistentes,
+          {
+            data: new Date().toISOString(),
+            alteracao
+          }
+        ]
+      });
+      mostrarToast('Anotação atualizada!');
+    } else {
+      await addDoc(collection(db, 'viagens'), {
+        categoria: 'observacao',
+        titulo,
+        conteudo,
+        userId: usuarioAtivo.uid,
+        realizado: false,
+        realizadaEm: null,
+        criadoEm: serverTimestamp(),
+        atualizadoEm: serverTimestamp(),
+        historicoLogs: [{
+          data: new Date().toISOString(),
+          alteracao: 'Observação criada.'
+        }]
+      });
+      mostrarToast('Anotação salva!');
+    }
+
+    document.getElementById('form-observacao').reset();
+    document.getElementById('obs-id').value = '';
+  } catch (erro) {
+    console.error('Erro ao salvar observação:', erro);
+    mostrarToast('Erro ao salvar observação.', 'erro');
+  }
+});
+
+document.getElementById('lista-observacoes').addEventListener('click', async (event) => {
+  const editarId = event.target.dataset.obsEditar;
+  const excluirId = event.target.dataset.obsExcluir;
+  const historicoId = event.target.dataset.obsHistorico;
+
+  if (editarId) {
+    const docSnap = await getDoc(doc(db, 'viagens', editarId));
+    const dados = docSnap.data();
+    if (!dados) return;
+    document.getElementById('obs-id').value = editarId;
+    document.getElementById('obs-titulo').value = dados.titulo || '';
+    document.getElementById('obs-conteudo').value = dados.conteudo || '';
+    document.getElementById('obs-titulo').focus();
+  }
+
+  if (excluirId) {
+    if (confirm('Excluir esta anotação?')) {
+      await deleteDoc(doc(db, 'viagens', excluirId));
+      mostrarToast('Anotação excluída!');
+    }
+  }
+
+  if (historicoId) {
+    const docSnap = await getDoc(doc(db, 'viagens', historicoId));
+    const dados = docSnap.data() || {};
+    const logs = Array.isArray(dados.historicoLogs) ? dados.historicoLogs : [];
+    const container = document.getElementById('obs-historico-conteudo');
+    if (!container) return;
+    container.innerHTML = logs.length
+      ? logs.map(item => `<div class="historico-item"><small>${formatarDataHora(item.data)}</small><div>${item.alteracao || 'Sem descrição'}</div></div>`).join('')
+      : '<p>Sem histórico de revisões.</p>';
+    document.getElementById('modal-obs-historico').classList.remove('escondido');
+  }
+});
+
+window.fecharModalObsHistorico = function(forcar = false, evento = null) {
+  const modal = document.getElementById('modal-obs-historico');
+  if (!modal) return;
+  if (forcar || (evento && evento.target === modal)) modal.classList.add('escondido');
+};
+
+// inicialização básica das listas de forma segura
+if (document.readyState !== 'loading') {
+  const tarefasContainerInicial = document.getElementById('container-viagem-tarefas');
+  if (tarefasContainerInicial) {
+    tarefasContainerInicial.innerHTML = '';
+    tarefasContainerInicial.appendChild(Object.assign(document.createElement('div'), { className: 'tarefa-input-row' }));
+  }
+}
 
 // UPLOAD DE IMAGEM
 document.getElementById('album-file').addEventListener('change', (e) => {
@@ -786,24 +1603,38 @@ async function carregarEstatisticas() {
   });
 }
 // Lista de Wallpapers disponíveis
+const WALLPAPER_PADRAO = 'assets/andjustice.jpg';
 const wallpapers = [
-    'assets/images (2).jfif',
-    // 'assets/bg2.jpg',
-    // 'assets/bg3.jpg'
+  'assets/andjustice.jpg',
+  'assets/images (2).jfif',
+  'assets/yh43bx8tdof21.jpg'
 ];
 
 let indiceWallpaperAtual = 0;
 
-// Função para mudar wallpaper
-function proximoWallpaper() {
-    // Incrementa e reseta para 0 ao atingir o tamanho do array (loop infinito)
-    indiceWallpaperAtual = (indiceWallpaperAtual + 1) % wallpapers.length;
-    
-    const bgContainer = document.getElementById('wallpaper-container');
-    if (bgContainer) {
-        bgContainer.style.backgroundImage = `url('${wallpapers[indiceWallpaperAtual]}')`;
-    }
+function aplicarWallpaper(index) {
+  const bgContainer = document.getElementById('wallpaper-container');
+  if (bgContainer) {
+    bgContainer.style.display = 'none';
+    bgContainer.style.backgroundImage = 'none';
+  }
+
+  document.body.style.background = 'transparent';
+  document.body.style.backgroundImage = 'none';
+  document.body.style.backgroundColor = 'transparent';
+
+  const urls = wallpapers.length ? wallpapers : [WALLPAPER_PADRAO];
+  const indice = Number.isInteger(index) ? index : indiceWallpaperAtual;
+  indiceWallpaperAtual = (Math.abs(indice) % urls.length + urls.length) % urls.length;
 }
+
+function proximoWallpaper() {
+  indiceWallpaperAtual = (indiceWallpaperAtual + 1) % wallpapers.length;
+  aplicarWallpaper(indiceWallpaperAtual);
+}
+
+aplicarWallpaper(indiceWallpaperAtual);
+setInterval(proximoWallpaper, 6000);
 
 // Função para atualizar a Saudação conforme o horário do dia
 function atualizarSaudacao() {
