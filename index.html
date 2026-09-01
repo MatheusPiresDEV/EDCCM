@@ -7,7 +7,8 @@
     <title>Avaliações de Álbuns | MusicBox</title>
     <link rel="stylesheet" href="style.css">
     <!-- Chart.js para os gráficos -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <!-- FontAwesome / Ícones Web (Opcional, usando emojis nativos e SVGs limpos) -->
 </head>
 
@@ -103,13 +104,16 @@
                 <span class="nav-text">Top 5</span>
             </button>
             <button class="nav-btn" data-target="sec-viagens">
-                <span class="nav-text">Viagens</span>
+                <span class="nav-text">To Do Lists</span>
             </button>
             <button class="nav-btn" data-target="sec-observacoes">
                 <span class="nav-text">Observações</span>
             </button>
             <button class="nav-btn" data-target="sec-estatisticas">
                 <span class="nav-text">Estatísticas</span>
+            </button>
+            <button class="nav-btn admin-only" data-target="sec-admin">
+                <span class="nav-text">Admin</span>
             </button>
             <button id="btn-logout" class="nav-btn btn-perigo" data-target="sec-dashboard">
                 <span class="nav-text">Sair</span>
@@ -300,20 +304,20 @@
 
         <section id="sec-viagens" class="tela escondido">
             <div class="secao-cabecalho">
-                <h2>Viagens</h2>
-                <button id="btn-nova-viagem" class="btn-primario btn-sm">Nova Viagem</button>
+                <h2>To do Lists</h2>
+                <button id="btn-nova-viagem" class="btn-primario btn-sm">Nova Ação</button>
             </div>
 
             <form id="form-viagem" class="glass-form">
                 <input type="hidden" id="viagem-id">
 
                 <div class="grupo-campo">
-                    <label for="viagem-titulo">Nome da viagem</label>
-                    <input type="text" id="viagem-titulo" placeholder="Ex: Viagem para o Rio de Janeiro" required>
+                    <label for="viagem-titulo">Ação</label>
+                    <input type="text" id="viagem-titulo" placeholder="Ex: Viagem Romenia" required>
                 </div>
 
                 <div class="form-acoes">
-                    <button type="submit" class="btn-sucesso">Salvar viagem</button>
+                    <button type="submit" class="btn-sucesso">Salvar Ação</button>
                     <button type="button" id="btn-cancelar-viagem" class="btn-secundario">Cancelar</button>
                 </div>
             </form>
@@ -353,6 +357,14 @@
                 <h2>Painel de Estatísticas</h2>
             </div>
 
+            <!-- Busca Rápida de Álbuns -->
+            <div style="margin: 20px 0; max-width: 600px;">
+                <input type="text" id="busca-rapida-stats" placeholder="🔍 Buscar álbum ou banda..." 
+                       style="width: 100%; padding: 10px 15px; border-radius: 8px; border: 1px solid var(--line); 
+                              background: rgba(15, 23, 42, 0.5); color: var(--text); font-size: 14px;">
+                <div id="resultado-busca-rapida" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div>
+            </div>
+
             <!-- Cards de Métricas Responsivos -->
             <div class="cards-stats">
                 <div class="card">
@@ -384,7 +396,14 @@
                     </div>
                 </div>
                 <div class="card">
-                    <div class="card-icon">🌟</div>
+                    <div class="card-icon">�</div>
+                    <div class="card-info">
+                        <h3>Bandas Diferentes</h3>
+                        <p id="stat-bandas-diferentes">0</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">�🌟</div>
                     <div class="card-info">
                         <h3>Década de Ouro</h3>
                         <p id="stat-decada-media">-</p>
@@ -411,10 +430,72 @@
                         <p id="stat-dias-off">-</p>
                     </div>
                 </div>
+                <div class="card">
+                    <div class="card-icon">🎵</div>
+                    <div class="card-info">
+                        <h3>Média de Faixas</h3>
+                        <p id="stat-media-faixas">0</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📏</div>
+                    <div class="card-info">
+                        <h3>Álbum Mais Extenso</h3>
+                        <p id="stat-album-extenso">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🧩</div>
+                    <div class="card-info">
+                        <h3>Álbum Mais Enxuto</h3>
+                        <p id="stat-album-enxuto">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🧮</div>
+                    <div class="card-info">
+                        <h3>Total de Faixas</h3>
+                        <p id="stat-total-faixas">0</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📉</div>
+                    <div class="card-info">
+                        <h3>Banda Menos Favorita</h3>
+                        <p id="stat-banda-pior">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon" id="tendencia-icon">📈</div>
+                    <div class="card-info">
+                        <h3>Tendência de Notas</h3>
+                        <p id="stat-tendencia">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📅</div>
+                    <div class="card-info">
+                        <h3>Mês Mais Produtivo</h3>
+                        <p id="stat-mes-produtivo">-</p>
+                    </div>
+                </div>
             </div>
 
-            <!-- Seção de Gráficos em Grid -->
             <div class="grid-graficos">
+                <div class="container-grafico">
+                    <h3><span>📊</span> Comparativo de Bandas por Nota Média</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="graficoBandas"></canvas>
+                    </div>
+                </div>
+
+                <div class="container-grafico">
+                    <h3><span>🎯</span> Dispersão de Bandas (Álbuns x Nota Média)</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="graficoDispersaoBandas"></canvas>
+                    </div>
+                </div>
+
                 <div class="container-grafico">
                     <h3><span>📊</span> Média de Notas por Década de Lançamento</h3>
                     <div class="canvas-wrapper">
@@ -427,6 +508,88 @@
                     <div class="canvas-wrapper">
                         <canvas id="graficoCorrelacao"></canvas>
                     </div>
+                </div>
+            </div>
+
+            <!-- Histórico de Avaliações / Timeline -->
+            <div class="container-grafico" style="margin-top: 40px;">
+                <h3><span>⏰</span> Histórico de Avaliações (Últimas Adições)</h3>
+                <div id="timeline-albuns" style="max-height: 600px; overflow-y: auto;">
+                    <!-- Preenchido dinamicamente -->
+                </div>
+            </div>
+        </section>
+
+        <section id="sec-admin" class="tela escondido">
+            <div class="secao-cabecalho">
+                <h2>Painel de Administração</h2>
+                <span class="badge-saudacao">Acesso restrito</span>
+            </div>
+
+            <div class="admin-dashboard-grid">
+                <div class="admin-card stat-admin">
+                    <span class="admin-card-label">Contas</span>
+                    <strong id="admin-total-usuarios">0</strong>
+                </div>
+                <div class="admin-card stat-admin">
+                    <span class="admin-card-label">Álbuns</span>
+                    <strong id="admin-total-albuns">0</strong>
+                </div>
+                <div class="admin-card stat-admin">
+                    <span class="admin-card-label">Top 5</span>
+                    <strong id="admin-total-top5">0</strong>
+                </div>
+                <div class="admin-card stat-admin">
+                    <span class="admin-card-label">Uso do banco</span>
+                    <strong id="admin-uso-banco">0%</strong>
+                </div>
+            </div>
+
+            <div class="admin-chart-box">
+                <h3>Uso por categoria no banco</h3>
+                <canvas id="graficoAdminUsoBanco"></canvas>
+            </div>
+
+            <div class="admin-panel">
+                <form id="form-admin-usuario" class="glass-form admin-form">
+                    <input type="hidden" id="admin-user-id">
+
+                    <div class="grupo-campo">
+                        <label for="admin-user-email">E-mail</label>
+                        <input type="email" id="admin-user-email" placeholder="novo@exemplo.com" required>
+                    </div>
+
+                    <div class="grupo-campo">
+                        <label for="admin-user-senha">Senha</label>
+                        <input type="text" id="admin-user-senha" placeholder="Nova senha" required>
+                    </div>
+
+                    <div class="grupo-campo">
+                        <label for="admin-user-role">Tipo de acesso</label>
+                        <select id="admin-user-role">
+                            <option value="user">Usuário</option>
+                            <option value="admin">Administrador</option>
+                        </select>
+                    </div>
+
+                    <div class="form-acoes">
+                        <button type="submit" class="btn-sucesso">Salvar usuário</button>
+                        <button type="button" id="admin-btn-limpar-usuario" class="btn-secundario">Limpar</button>
+                    </div>
+                </form>
+
+                <div class="admin-table-container">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>E-mail</th>
+                                <th>Tipo</th>
+                                <th>Última atualização</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-usuarios-body"></tbody>
+                    </table>
                 </div>
             </div>
         </section>

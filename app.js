@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { 
-  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut 
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, updateEmail, updatePassword 
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
   getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot 
@@ -443,8 +443,10 @@ function calcularIdade(dataBase = new Date()) {
 }
 
 let usuarioAtual = null;
+let perfilUsuarioAtual = null;
 let meuGrafico = null;
 let graficoDecadasChart = null;
+let adminChart = null;
 let imagemBase64Temp = "";
 let todosOsAlbuns = [];
 let albunsFiltrados = [];
@@ -454,6 +456,325 @@ let top5Unsubscribe = null;
 let viagensUnsubscribe = null;
 let observacoesUnsubscribe = null;
 const ITENS_POR_PAGINA = 12;
+const ADMIN_EMAILS = ['matheusgustavodasilvapires@gmail.com'];
+const PERFIL_USERS_COLLECTION = 'usuarios';
+
+function ajustarAlturaCanvas(canvas, totalItens, minHeight = 300, alturaPorItem = 42, maxHeight = 620, minWidth = 720) {
+  if (!canvas) return;
+
+  const wrapper = canvas.closest('.canvas-wrapper');
+  const alturaDinamica = Math.min(Math.max(minHeight, totalItens * alturaPorItem), maxHeight);
+  const larguraDinamica = Math.max(minWidth, totalItens * 18);
+
+  canvas.style.height = `${alturaDinamica}px`;
+  canvas.style.minHeight = `${alturaDinamica}px`;
+  canvas.style.width = `${larguraDinamica}px`;
+  canvas.style.minWidth = `${larguraDinamica}px`;
+
+  if (wrapper) {
+    wrapper.style.height = `${alturaDinamica}px`;
+    wrapper.style.maxHeight = `${maxHeight}px`;
+    wrapper.style.minWidth = '100%';
+    wrapper.scrollLeft = 0;
+  }
+}
+
+function normalizarEmail(email = '') {
+  return (email || '').trim().toLowerCase();
+}
+
+function usuarioEhAdmin(user = null, perfil = null) {
+  const emailUsuario = normalizarEmail(user?.email || perfil?.email || '');
+  const papel = (perfil?.role || '').toLowerCase();
+  return papel === 'admin' || ADMIN_EMAILS.includes(emailUsuario);
+}
+
+async function garantirPerfilUsuario(user) {
+  if (!user) {
+    perfilUsuarioAtual = null;
+    return null;
+  }
+
+  const perfilRef = doc(db, PERFIL_USERS_COLLECTION, user.uid);
+  const perfilSnap = await getDoc(perfilRef);
+
+  if (!perfilSnap.exists()) {
+    const perfilBase = {
+      uid: user.uid,
+      email: user.email || '',
+      role: ADMIN_EMAILS.includes(normalizarEmail(user.email)) ? 'admin' : 'user',
+      criadoEm: serverTimestamp(),
+      atualizadoEm: serverTimestamp(),
+      ultimoLogin: serverTimestamp()
+    };
+    await setDoc(perfilRef, perfilBase);
+    perfilUsuarioAtual = { id: user.uid, ...perfilBase };
+    return perfilUsuarioAtual;
+  }
+
+  const perfilExistente = { id: perfilSnap.id, ...perfilSnap.data() };
+  const deveSerAdmin = usuarioEhAdmin(user, perfilExistente);
+
+  if (deveSerAdmin && String(perfilExistente.role || '').toLowerCase() !== 'admin') {
+    await updateDoc(perfilRef, {
+      role: 'admin',
+      email: user.email || perfilExistente.email || '',
+      atualizadoEm: serverTimestamp()
+    });
+  }
+
+  perfilUsuarioAtual = { ...perfilExistente, role: deveSerAdmin ? 'admin' : (perfilExistente.role || 'user') };
+  if (normalizarEmail(perfilUsuarioAtual.email) !== normalizarEmail(user.email || '')) {
+    await updateDoc(perfilRef, {
+      email: user.email || perfilUsuarioAtual.email || '',
+      atualizadoEm: serverTimestamp()
+    });
+    perfilUsuarioAtual.email = user.email || perfilUsuarioAtual.email || '';
+  }
+
+  return perfilUsuarioAtual;
+}
+
+async function carregarEstatisticasAdmin() {
+  try {
+    const [usuariosSnap, albunsSnap, top5Snap, viagensSnap] = await Promise.all([
+      getDocs(collection(db, PERFIL_USERS_COLLECTION)),
+      getDocs(collection(db, 'albuns')),
+      getDocs(query(collection(db, 'viagens'), where('categoria', '==', 'top5'))),
+      getDocs(collection(db, 'viagens'))
+    ]);
+
+    const totalUsuarios = usuariosSnap.size;
+    const totalAlbuns = albunsSnap.size;
+    const totalTop5 = top5Snap.size;
+    const totalViagens = viagensSnap.size;
+    const totalDocumentos = totalUsuarios + totalAlbuns + totalTop5 + totalViagens;
+    const usoPercentual = Math.min(100, ((totalDocumentos / 25000) * 100).toFixed(1));
+
+    const totalUsuariosEl = document.getElementById('admin-total-usuarios');
+    const totalAlbunsEl = document.getElementById('admin-total-albuns');
+    const totalTop5El = document.getElementById('admin-total-top5');
+    const usoBancoEl = document.getElementById('admin-uso-banco');
+
+    if (totalUsuariosEl) totalUsuariosEl.textContent = totalUsuarios;
+    if (totalAlbunsEl) totalAlbunsEl.textContent = totalAlbuns;
+    if (totalTop5El) totalTop5El.textContent = totalTop5;
+    if (usoBancoEl) usoBancoEl.textContent = `${usoPercentual}%`;
+
+    const ctx = document.getElementById('graficoAdminUsoBanco')?.getContext('2d');
+    if (ctx) {
+      const labels = ['Usuários', 'Álbuns', 'Top 5', 'Viagens'];
+      const data = [totalUsuarios, totalAlbuns, totalTop5, totalViagens];
+
+      if (adminChart) adminChart.destroy();
+
+      adminChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data,
+            backgroundColor: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#e5e7eb' } }
+          }
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Erro ao carregar estatísticas do admin:', error);
+    mostrarToast('Não foi possível carregar as estatísticas de admin.', 'erro');
+  }
+}
+
+async function carregarUsuariosAdmin() {
+  try {
+    const usuariosSnap = await getDocs(query(collection(db, PERFIL_USERS_COLLECTION)));
+    const usuarios = usuariosSnap.docs
+      .map((docUsuario) => ({ id: docUsuario.id, ...docUsuario.data() }))
+      .sort((a, b) => (a.email || '').localeCompare(b.email || ''));
+
+    const tbody = document.getElementById('admin-usuarios-body');
+    if (!tbody) return;
+
+    if (!usuarios.length) {
+      tbody.innerHTML = '<tr><td colspan="4">Nenhum usuário cadastrado.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = usuarios.map((usuario) => {
+      const papel = String(usuario.role || 'user').toLowerCase();
+      const tipoLabel = papel === 'admin' ? 'Administrador' : 'Usuário';
+      const ultimaAtualizacao = formatarDataHora(usuario.atualizadoEm || usuario.criadoEm);
+      const ehMesmoUsuario = usuarioAtual && usuario.uid === usuarioAtual.uid;
+
+      return `
+        <tr>
+          <td>${usuario.email || 'Sem e-mail'}</td>
+          <td><span class="admin-role-tag ${papel === 'admin' ? 'admin' : ''}">${tipoLabel}</span></td>
+          <td>${ultimaAtualizacao}</td>
+          <td>
+            <button type="button" class="btn-alerta admin-acao" data-admin-editar="${usuario.id}">Editar</button>
+            <button type="button" class="btn-perigo admin-acao" data-admin-excluir="${usuario.id}" ${ehMesmoUsuario ? 'disabled' : ''}>Excluir</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (error) {
+    console.error('Erro ao carregar usuários do admin:', error);
+    mostrarToast('Não foi possível carregar a lista de usuários.', 'erro');
+  }
+}
+
+async function renderAdminDashboard() {
+  if (!usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
+    mostrarToast('Acesso de administrador negado.', 'erro');
+    navegarPara('sec-dashboard');
+    return;
+  }
+
+  await carregarEstatisticasAdmin();
+  await carregarUsuariosAdmin();
+}
+
+function aplicarAcessoAdmin() {
+  const adminButtons = document.querySelectorAll('.admin-only');
+  const permitido = usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual);
+
+  adminButtons.forEach((botao) => {
+    botao.classList.toggle('escondido', !permitido);
+  });
+}
+
+async function editarUsuarioAdmin(idUsuario) {
+  try {
+    const perfilDoc = await getDoc(doc(db, PERFIL_USERS_COLLECTION, idUsuario));
+    if (!perfilDoc.exists()) {
+      mostrarToast('Usuário não encontrado.', 'erro');
+      return;
+    }
+
+    const usuario = { id: perfilDoc.id, ...perfilDoc.data() };
+    const inputId = document.getElementById('admin-user-id');
+    const inputEmail = document.getElementById('admin-user-email');
+    const inputSenha = document.getElementById('admin-user-senha');
+    const inputRole = document.getElementById('admin-user-role');
+
+    if (inputId) inputId.value = usuario.id;
+    if (inputEmail) inputEmail.value = usuario.email || '';
+    if (inputSenha) inputSenha.value = '';
+    if (inputRole) inputRole.value = String(usuario.role || 'user');
+
+    window.navegarPara('sec-admin');
+  } catch (error) {
+    console.error('Erro ao editar usuário admin:', error);
+    mostrarToast('Não foi possível carregar este usuário para edição.', 'erro');
+  }
+}
+
+async function excluirUsuarioAdmin(idUsuario) {
+  if (!idUsuario) return;
+
+  if (usuarioAtual && idUsuario === usuarioAtual.uid) {
+    mostrarToast('Você não pode excluir sua própria conta no painel admin.', 'erro');
+    return;
+  }
+
+  const confirmar = window.confirm('Tem certeza que deseja remover este usuário do painel?');
+  if (!confirmar) return;
+
+  try {
+    await deleteDoc(doc(db, PERFIL_USERS_COLLECTION, idUsuario));
+    mostrarToast('Usuário removido do painel de administração.');
+    await carregarUsuariosAdmin();
+    await carregarEstatisticasAdmin();
+  } catch (error) {
+    console.error('Erro ao excluir usuário admin:', error);
+    mostrarToast('Não foi possível excluir este usuário.', 'erro');
+  }
+}
+
+async function salvarUsuarioAdmin(event) {
+  event.preventDefault();
+
+  if (!usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
+    mostrarToast('Acesso de administrador obrigatório.', 'erro');
+    return;
+  }
+
+  const inputId = document.getElementById('admin-user-id');
+  const inputEmail = document.getElementById('admin-user-email');
+  const inputSenha = document.getElementById('admin-user-senha');
+  const inputRole = document.getElementById('admin-user-role');
+
+  if (!inputEmail || !inputSenha || !inputRole) return;
+
+  const email = inputEmail.value.trim();
+  const senha = inputSenha.value.trim();
+  const role = inputRole.value;
+
+  if (!email || !senha) {
+    mostrarToast('Preencha e-mail e senha antes de salvar.', 'erro');
+    return;
+  }
+
+  const idUsuario = inputId ? inputId.value : '';
+
+  if (idUsuario) {
+    try {
+      const perfilRef = doc(db, PERFIL_USERS_COLLECTION, idUsuario);
+      await updateDoc(perfilRef, {
+        email,
+        role,
+        atualizadoEm: serverTimestamp()
+      });
+
+      if (usuarioAtual && idUsuario === usuarioAtual.uid) {
+        const userAtual = auth.currentUser;
+        if (userAtual && userAtual.email !== email) {
+          await updateEmail(userAtual, email);
+        }
+        if (userAtual && senha) {
+          await updatePassword(userAtual, senha);
+        }
+      } else {
+        mostrarToast('Perfil atualizado. Para trocar senha/e-mail de outra conta, use um backend admin.', 'erro');
+      }
+
+      mostrarToast('Usuário atualizado com sucesso.');
+    } catch (error) {
+      console.error('Erro ao atualizar usuário:', error);
+      mostrarToast('Não foi possível atualizar este usuário.', 'erro');
+    }
+  } else {
+    try {
+      const novoUsuario = await createUserWithEmailAndPassword(auth, email, senha);
+      await setDoc(doc(db, PERFIL_USERS_COLLECTION, novoUsuario.user.uid), {
+        uid: novoUsuario.user.uid,
+        email: novoUsuario.user.email || email,
+        role,
+        criadoEm: serverTimestamp(),
+        atualizadoEm: serverTimestamp(),
+        ultimoLogin: serverTimestamp()
+      });
+      mostrarToast('Usuário criado com sucesso.');
+    } catch (error) {
+      console.error('Erro ao criar usuário:', error);
+      mostrarToast('Não foi possível criar este usuário.', 'erro');
+    }
+  }
+
+  document.getElementById('form-admin-usuario')?.reset();
+  document.getElementById('admin-user-id').value = '';
+  await carregarUsuariosAdmin();
+  await carregarEstatisticasAdmin();
+}
 
 function mostrarToast(mensagem, tipo = 'sucesso') {
   const toast = document.getElementById('toast');
@@ -541,7 +862,8 @@ window.navegarPara = function(idTela) {
     'sec-top5': 'sec-top5',
     'sec-viagens': 'sec-viagens',
     'sec-observacoes': 'sec-observacoes',
-    'sec-estatisticas': 'sec-estatisticas'
+    'sec-estatisticas': 'sec-estatisticas',
+    'sec-admin': 'sec-admin'
   };
 
   document.querySelectorAll('.nav-btn').forEach((button) => {
@@ -555,6 +877,7 @@ window.navegarPara = function(idTela) {
 
   if (idTela === 'sec-dashboard') carregarAlbuns();
   if (idTela === 'sec-estatisticas') carregarEstatisticas();
+  if (idTela === 'sec-admin') renderAdminDashboard();
 };
 
 window.prepararNovoAlbum = function() {
@@ -589,11 +912,42 @@ document.getElementById('btn-login').addEventListener('click', () => {
     .catch(err => mostrarToast("E-mail ou senha incorretos", "erro"));
 });
 
+const formAdminUsuario = document.getElementById('form-admin-usuario');
+if (formAdminUsuario) {
+  formAdminUsuario.addEventListener('submit', salvarUsuarioAdmin);
+}
+
+const btnLimparAdminUsuario = document.getElementById('admin-btn-limpar-usuario');
+if (btnLimparAdminUsuario) {
+  btnLimparAdminUsuario.addEventListener('click', () => {
+    const formAdmin = document.getElementById('form-admin-usuario');
+    if (formAdmin) formAdmin.reset();
+    const inputId = document.getElementById('admin-user-id');
+    if (inputId) inputId.value = '';
+  });
+}
+
+const tbodyAdminUsuarios = document.getElementById('admin-usuarios-body');
+if (tbodyAdminUsuarios) {
+  tbodyAdminUsuarios.addEventListener('click', async (event) => {
+    const target = event.target.closest('[data-admin-editar]');
+    const targetExcluir = event.target.closest('[data-admin-excluir]');
+
+    if (target) {
+      await editarUsuarioAdmin(target.dataset.adminEditar);
+    }
+
+    if (targetExcluir) {
+      await excluirUsuarioAdmin(targetExcluir.dataset.adminExcluir);
+    }
+  });
+}
+
 document.getElementById('btn-logout').addEventListener('click', () => {
   signOut(auth).then(() => bloquearTela());
 });
 
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   const lockscreen = document.getElementById('lockscreen');
 
   if (top5Unsubscribe) top5Unsubscribe();
@@ -602,6 +956,8 @@ onAuthStateChanged(auth, (user) => {
 
   if (user) {
     usuarioAtual = user;
+    perfilUsuarioAtual = await garantirPerfilUsuario(user);
+    aplicarAcessoAdmin();
     document.getElementById('main-header').classList.remove('escondido');
     if (lockscreen) {
       lockscreen.style.zIndex = '0';
@@ -615,6 +971,8 @@ onAuthStateChanged(auth, (user) => {
     navegarPara('sec-dashboard');
   } else {
     usuarioAtual = null;
+    perfilUsuarioAtual = null;
+    aplicarAcessoAdmin();
     const mainHeader = document.getElementById('main-header');
     if (mainHeader) mainHeader.classList.add('escondido');
 
@@ -1490,10 +1848,16 @@ async function carregarEstatisticas() {
     document.getElementById('stat-melhor').innerText = '-';
     document.getElementById('stat-pior').innerText = '-';
     document.getElementById('stat-banda-top').innerText = '-';
+    document.getElementById('stat-banda-pior').innerText = '-';
+    document.getElementById('stat-bandas-diferentes').innerText = '0';
     document.getElementById('stat-decada-media').innerText = '-';
     document.getElementById('stat-decada-qtd').innerText = '-';
     document.getElementById('stat-dia-ativo').innerText = '-';
     document.getElementById('stat-dias-off').innerText = '-';
+    document.getElementById('stat-media-faixas').innerText = '0';
+    document.getElementById('stat-album-extenso').innerText = '-';
+    document.getElementById('stat-album-enxuto').innerText = '-';
+    document.getElementById('stat-total-faixas').innerText = '0';
     return;
   }
 
@@ -1508,6 +1872,17 @@ async function carregarEstatisticas() {
   });
   const bandaTop = Object.keys(contagemBandas).reduce((a, b) => contagemBandas[a] > contagemBandas[b] ? a : b);
   document.getElementById('stat-banda-top').innerText = `${bandaTop} (${contagemBandas[bandaTop]} álbuns)`;
+  document.getElementById('stat-bandas-diferentes').innerText = Object.keys(contagemBandas).length;
+
+  const totalFaixas = albuns.reduce((total, album) => total + (Array.isArray(album.faixas) ? album.faixas.length : 0), 0);
+  const mediaFaixas = totalFaixas / albuns.length;
+  const albumExtenso = [...albuns].sort((a, b) => (Array.isArray(b.faixas) ? b.faixas.length : 0) - (Array.isArray(a.faixas) ? a.faixas.length : 0))[0];
+  const albumEnxuto = [...albuns].sort((a, b) => (Array.isArray(a.faixas) ? a.faixas.length : 0) - (Array.isArray(b.faixas) ? b.faixas.length : 0))[0];
+
+  document.getElementById('stat-media-faixas').innerText = `${mediaFaixas.toFixed(1)} faixas/álbum`;
+  document.getElementById('stat-album-extenso').innerText = `${albumExtenso?.nome || '-'} (${albumExtenso?.faixas?.length || 0})`;
+  document.getElementById('stat-album-enxuto').innerText = `${albumEnxuto?.nome || '-'} (${albumEnxuto?.faixas?.length || 0})`;
+  document.getElementById('stat-total-faixas').innerText = totalFaixas;
 
   const decadas = {};
   albuns.forEach(a => {
@@ -1571,7 +1946,7 @@ async function carregarEstatisticas() {
     const hoje = new Date();
     const diffTempo = Math.abs(hoje - dataMaisRecente);
     const diffDias = Math.floor(diffTempo / (1000 * 60 * 60 * 24));
-    
+
     if (diffDias === 0) {
       document.getElementById('stat-dias-off').innerText = 'Hoje!';
     } else {
@@ -1581,9 +1956,189 @@ async function carregarEstatisticas() {
     document.getElementById('stat-dias-off').innerText = '-';
   }
 
-  // --- GRÁFICO 1: DÉCADAS ---
+  const bandasResumo = Object.entries(contagemBandas).map(([banda, quantidade]) => {
+    const albunsDaBanda = albuns.filter(album => (album.banda || '').trim() === banda);
+    const somaMedia = albunsDaBanda.reduce((total, album) => total + Number(album.media || 0), 0);
+    const mediaBanda = albunsDaBanda.length ? somaMedia / albunsDaBanda.length : 0;
+    return {
+      banda,
+      quantidade,
+      media: Number(mediaBanda.toFixed(2))
+    };
+  }).sort((a, b) => b.media - a.media || b.quantidade - a.quantidade);
+
+  // Calcular banda com a menor nota média
+  const bandaPior = bandasResumo[bandasResumo.length - 1];
+  document.getElementById('stat-banda-pior').innerText = `${bandaPior.banda} (${bandaPior.media.toFixed(2)}/10)`;
+
+  const bandasVisiveis = bandasResumo.slice(0, 12);
+  let bandasAgrupadas = [...bandasVisiveis];
+
+  if (bandasResumo.length > 12) {
+    const demais = bandasResumo.slice(12);
+    const quantidadeRestante = demais.reduce((total, item) => total + item.quantidade, 0);
+    const mediaRestante = demais.length
+      ? demais.reduce((total, item) => total + item.media * item.quantidade, 0) / quantidadeRestante
+      : 0;
+
+    bandasAgrupadas.push({
+      banda: 'Outras',
+      quantidade: quantidadeRestante,
+      media: Number(mediaRestante.toFixed(2))
+    });
+  }
+
+  const faixaMediaPorBanda = bandasAgrupadas.length ? bandasAgrupadas.map(item => item.media) : [0];
+  const labelsBandas = bandasAgrupadas.length ? bandasAgrupadas.map(item => item.banda) : ['Sem dados'];
+
+  const graficoBandasCtx = document.getElementById('graficoBandas')?.getContext('2d');
+  if (window.graficoBandasChart) window.graficoBandasChart.destroy();
+
+  if (graficoBandasCtx) {
+    const labelsBandasCurtas = labelsBandas.map(label => {
+      if (label === 'Outras') return 'Outras';
+      return label.length > 18 ? `${label.slice(0, 15)}…` : label;
+    });
+
+    ajustarAlturaCanvas(graficoBandasCtx.canvas, labelsBandas.length, 360, 28, 620, 860);
+
+    window.graficoBandasChart = new Chart(graficoBandasCtx, {
+      type: 'bar',
+      data: {
+        labels: labelsBandasCurtas,
+        datasets: [{
+          label: 'Média da banda',
+          data: faixaMediaPorBanda,
+          backgroundColor: labelsBandas.map((_, index) => index === 0 ? '#22c55e' : index === labelsBandas.length - 1 ? '#f97316' : '#3b82f6'),
+          borderRadius: 8,
+          borderSkipped: false,
+          barThickness: 18
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 600 },
+        layout: { padding: { top: 8, right: 12, bottom: 8, left: 12 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const label = labelsBandas[items[0]?.dataIndex ?? 0] || '';
+                return label;
+              },
+              label: (ctx) => `${ctx.parsed.x.toFixed(2)} / 10`
+            }
+          }
+        },
+        scales: {
+          x: {
+            min: 0,
+            max: 10,
+            ticks: {
+              color: '#fff',
+              stepSize: 2,
+              maxTicksLimit: 8
+            },
+            grid: { color: 'rgba(255,255,255,0.08)' },
+            title: { display: true, text: 'Nota média', color: '#fff' }
+          },
+          y: {
+            ticks: {
+              color: '#fff',
+              autoSkip: false,
+              maxTicksLimit: 12
+            },
+            grid: { display: false }
+          }
+        }
+      }
+    });
+  }
+
+  const dispersaoBandasCtx = document.getElementById('graficoDispersaoBandas')?.getContext('2d');
+  if (window.graficoDispersaoBandasChart) window.graficoDispersaoBandasChart.destroy();
+
+  if (dispersaoBandasCtx) {
+    const scatterData = bandasResumo.map(item => ({
+      x: item.quantidade,
+      y: item.media,
+      r: Math.min(12, 5 + item.quantidade * 1.2)
+    }));
+
+    const maxXScatter = Math.max(8, ...scatterData.map(item => item.x), 1);
+    ajustarAlturaCanvas(dispersaoBandasCtx.canvas, scatterData.length, 360, 36, 620, 780);
+
+    window.graficoDispersaoBandasChart = new Chart(dispersaoBandasCtx, {
+      type: 'bubble',
+      data: {
+        datasets: [{
+          label: 'Bandas',
+          data: scatterData,
+          backgroundColor: 'rgba(34, 197, 94, 0.7)',
+          borderColor: '#86efac',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 500 },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${labelsBandas[ctx.dataIndex]} · ${ctx.raw.x} álbuns · ${ctx.raw.y.toFixed(2)}/10`
+            }
+          },
+          zoom: {
+            pan: {
+              enabled: true,
+              mode: 'xy',
+              threshold: 10
+            },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: 'xy',
+              drag: false,
+              limits: {
+                x: { min: 0, max: Math.max(15, maxXScatter + 5) },
+                y: { min: 0, max: 10 }
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            min: 0,
+            max: Math.max(15, maxXScatter + 5),
+            title: { display: true, text: 'Quantidade de álbuns', color: '#fff' },
+            ticks: {
+              color: '#fff',
+              autoSkip: true,
+              maxTicksLimit: 10
+            },
+            grid: { color: 'rgba(255,255,255,0.08)' }
+          },
+          y: {
+            min: 0,
+            max: 10,
+            title: { display: true, text: 'Nota média', color: '#fff' },
+            ticks: { color: '#fff', stepSize: 2, maxTicksLimit: 8 },
+            grid: { color: 'rgba(255,255,255,0.08)' }
+          }
+        }
+      }
+    });
+  }
+
   const ctxDecadas = document.getElementById('graficoDecadas').getContext('2d');
   if (window.graficoDecadasChart) window.graficoDecadasChart.destroy();
+
+  ajustarAlturaCanvas(ctxDecadas.canvas, labelsDecadas.length, 360, 34, 620, 780);
 
   window.graficoDecadasChart = new Chart(ctxDecadas, {
     type: 'bar',
@@ -1593,72 +2148,261 @@ async function carregarEstatisticas() {
         label: 'Nota Média por Década',
         data: mediasDecadas,
         backgroundColor: '#3498db',
-        borderRadius: 6
+        borderRadius: 6,
+        barThickness: 26
       }]
     },
     options: {
       responsive: true,
-      maintainAspectRatio: false, // Permite expandir a altura no container CSS
+      maintainAspectRatio: false,
       plugins: {
         legend: { labels: { color: '#fff' } }
       },
       scales: {
-        y: { min: 0, max: 10, ticks: { color: '#fff' } },
-        x: { ticks: { color: '#fff' } }
-      }
-    }
-  });
-
-  // --- GRÁFICO 2: NOTA X ANO DE LANÇAMENTO ---
-  const albunsPorAno = [...albuns].sort((a, b) => a.ano - b.ano);
-  const labelsAnos = albunsPorAno.map(a => `${a.nome} (${a.ano})`);
-  const notas = albunsPorAno.map(a => a.media);
-
-  const ctx = document.getElementById('graficoCorrelacao').getContext('2d');
-  if (window.meuGrafico) window.meuGrafico.destroy();
-
-  window.meuGrafico = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labelsAnos,
-      datasets: [{
-        label: 'Nota Média do Álbum',
-        data: notas,
-        borderColor: '#1db954',
-        backgroundColor: 'rgba(29, 185, 84, 0.2)',
-        borderWidth: 3,
-        pointRadius: 6,
-        pointHoverRadius: 9,
-        pointBackgroundColor: '#1db954',
-        fill: true,
-        tension: 0.2
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false, // Permite expandir a altura no container CSS
-      plugins: {
-        legend: { labels: { color: '#fff' } }
-      },
-      scales: {
-        x: { 
-          title: { display: true, text: 'Álbuns (Ordenados por Ano)', color: '#fff' }, 
-          ticks: { 
+        y: { min: 0, max: 10, ticks: { color: '#fff', maxTicksLimit: 8 } },
+        x: {
+          ticks: {
             color: '#fff',
-            autoSkip: false, // Garante visibilidade dos rótulos mesmo com muitos álbuns
-            maxRotation: 45,
-            minRotation: 45
-          } 
-        },
-        y: { 
-          min: 0, max: 10,
-          title: { display: true, text: 'Nota Média', color: '#fff' }, 
-          ticks: { color: '#fff' } 
+            autoSkip: true,
+            maxTicksLimit: 12
+          }
         }
       }
     }
   });
+
+  const albunsPorAno = [...albuns].filter(album => Number(album.ano) > 0).sort((a, b) => Number(a.ano || 0) - Number(b.ano || 0));
+  const anosRegistrados = [...new Set(albunsPorAno.map(album => Number(album.ano || 0)))].sort((a, b) => a - b);
+  const datasetLinha = albunsPorAno.map(album => ({
+    x: Number(album.ano || 0),
+    y: Number(album.media || 0),
+    album: album.nome || 'Álbum sem nome',
+    banda: album.banda || 'Banda desconhecida',
+    ano: Number(album.ano || 0),
+    nota: Number(album.media || 0)
+  }));
+
+  const xMin = anosRegistrados.length ? Math.min(...anosRegistrados) : 1900;
+  const xMax = anosRegistrados.length ? Math.max(...anosRegistrados) : 2100;
+
+  const ctx = document.getElementById('graficoCorrelacao')?.getContext('2d');
+  if (window.meuGrafico) window.meuGrafico.destroy();
+
+  const canvasCorrelacao = document.getElementById('graficoCorrelacao');
+  const wrapperCorrelacao = canvasCorrelacao?.closest('.canvas-wrapper');
+
+  if (canvasCorrelacao && wrapperCorrelacao) {
+    const larguraMinima = Math.max(wrapperCorrelacao.clientWidth, Math.max(420, albunsPorAno.length * 50));
+    canvasCorrelacao.style.width = `${larguraMinima}px`;
+    canvasCorrelacao.style.minWidth = `${larguraMinima}px`;
+    canvasCorrelacao.style.height = '350px';
+  }
+
+  if (!ctx) return;
+
+  window.meuGrafico = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        label: 'Nota Média do Álbum',
+        data: datasetLinha,
+        borderColor: '#1db954',
+        backgroundColor: 'rgba(29, 185, 84, 0.15)',
+        borderWidth: 3,
+        pointRadius: 5,
+        pointHoverRadius: 8,
+        pointBackgroundColor: '#34d399',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        cubicInterpolationMode: 'monotone'
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      animation: { duration: 600 },
+      interaction: { mode: 'nearest', intersect: false },
+      layout: { padding: { top: 10, right: 12, bottom: 16, left: 10 } },
+      plugins: {
+        legend: { labels: { color: '#fff' } },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const item = items[0]?.raw || {};
+              return `${item.banda || 'Banda desconhecida'} · ${item.album || 'Álbum sem nome'}`;
+            },
+            label: (context) => {
+              const item = context.raw || {};
+              return `Ano: ${item.ano || '-'} · Nota: ${(item.nota ?? context.parsed.y).toFixed(1)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: xMin - 1,
+          max: xMax + 1,
+          title: { display: true, text: 'Ano de Lançamento', color: '#fff' },
+          ticks: {
+            color: '#fff',
+            stepSize: 1,
+            maxRotation: 0,
+            minRotation: 0,
+            callback: (value) => {
+              const numero = Number(value);
+              return anosRegistrados.includes(numero) ? String(numero) : '';
+            }
+          },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+          border: { color: 'rgba(255,255,255,0.18)' }
+        },
+        y: {
+          min: 0,
+          max: 10,
+          title: { display: true, text: 'Nota Média', color: '#fff' },
+          ticks: {
+            color: '#fff',
+            stepSize: 2,
+            maxTicksLimit: 6
+          },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+          border: { color: 'rgba(255,255,255,0.18)' }
+        }
+      }
+    }
+  });
+
+  // Calcular tendência de notas
+  const albunsPorData = [...albuns].filter(a => a.criadoEm).sort((a, b) => new Date(a.criadoEm) - new Date(b.criadoEm));
+  if (albunsPorData.length >= 2) {
+    const metadeAtual = albunsPorData.slice(-Math.floor(albunsPorData.length / 2));
+    const metadeAnterior = albunsPorData.slice(0, Math.floor(albunsPorData.length / 2));
+    
+    const mediaAtual = metadeAtual.reduce((sum, a) => sum + (a.media || 0), 0) / metadeAtual.length;
+    const mediaAnterior = metadeAnterior.reduce((sum, a) => sum + (a.media || 0), 0) / metadeAnterior.length;
+    
+    const diferenca = (mediaAtual - mediaAnterior).toFixed(2);
+    const tendenciaIcon = document.getElementById('tendencia-icon');
+    const tendenciaText = document.getElementById('stat-tendencia');
+    
+    if (diferenca > 0) {
+      tendenciaIcon.textContent = '📈';
+      tendenciaText.innerText = `+${diferenca} (Melhorando!)`;
+      tendenciaText.style.color = 'var(--primary)';
+    } else if (diferenca < 0) {
+      tendenciaIcon.textContent = '📉';
+      tendenciaText.innerText = `${diferenca} (Em queda)`;
+      tendenciaText.style.color = 'var(--danger)';
+    } else {
+      tendenciaIcon.textContent = '➡️';
+      tendenciaText.innerText = 'Estável';
+      tendenciaText.style.color = 'var(--warning)';
+    }
+  }
+
+  // Calcular mês mais produtivo
+  const mesPorContagem = {};
+  albuns.forEach(a => {
+    if (a.criadoEm) {
+      const data = new Date(a.criadoEm);
+      const mesAno = data.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long' });
+      mesPorContagem[mesAno] = (mesPorContagem[mesAno] || 0) + 1;
+    }
+  });
+
+  if (Object.keys(mesPorContagem).length > 0) {
+    const mesMaisProdutivo = Object.keys(mesPorContagem).reduce((a, b) => mesPorContagem[a] > mesPorContagem[b] ? a : b);
+    document.getElementById('stat-mes-produtivo').innerText = `${mesMaisProdutivo} (${mesPorContagem[mesMaisProdutivo]} álbuns)`;
+  } else {
+    document.getElementById('stat-mes-produtivo').innerText = '-';
+  }
+
+  // Carregar Timeline
+  carregarTimeline(albuns);
 }
+
+// Timeline de histórico
+function carregarTimeline(albuns) {
+  const timelineContainer = document.getElementById('timeline-albuns');
+  if (!timelineContainer) return;
+
+  const albunsPorData = [...albuns].filter(a => a.criadoEm).sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm)).slice(0, 20);
+
+  if (albunsPorData.length === 0) {
+    timelineContainer.innerHTML = '<p style="text-align: center; color: var(--muted); padding: 20px;">Nenhum álbum adicionado ainda.</p>';
+    return;
+  }
+
+  timelineContainer.innerHTML = albunsPorData.map(album => {
+    const data = new Date(album.criadoEm);
+    const dataFormatada = data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return `
+      <div class="timeline-item" onclick="navegarPara('sec-dashboard')">
+        <div class="timeline-item-time">${dataFormatada}</div>
+        <div class="timeline-item-content">
+          <div class="timeline-item-title">${album.nome || 'Álbum sem nome'}</div>
+          <div class="timeline-item-banda">${album.banda || 'Artista desconhecido'}</div>
+          <div class="timeline-item-nota">⭐ ${album.media || '0'}/10</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Busca Rápida
+window.executarBuscaRapida = function(query) {
+  const inputBusca = document.getElementById('busca-rapida-stats');
+  const resultContainer = document.getElementById('resultado-busca-rapida');
+
+  if (!query) {
+    query = inputBusca?.value?.toLowerCase() || '';
+  }
+
+  if (!query) {
+    resultContainer.innerHTML = '';
+    return;
+  }
+
+  // Buscar no Firebase
+  const q = window.query(window.collection(window.db, 'albuns'), window.where('userId', '==', usuarioAtual.uid));
+  window.getDocs(q).then(snapshot => {
+    const resultados = [];
+    snapshot.forEach(docSnap => {
+      const album = docSnap.data();
+      if (album.nome?.toLowerCase().includes(query) || 
+          album.banda?.toLowerCase().includes(query) ||
+          album.genero?.toLowerCase().includes(query)) {
+        resultados.push(album);
+      }
+    });
+
+    if (resultados.length === 0) {
+      resultContainer.innerHTML = '<p style="color: var(--muted); padding: 10px;">Nenhum resultado encontrado.</p>';
+      return;
+    }
+
+    resultContainer.innerHTML = resultados.slice(0, 8).map(album => `
+      <div class="resultado-busca-item" onclick="alert('${album.nome} - ${album.banda}')">
+        <div class="resultado-busca-item-titulo">${album.nome}</div>
+        <div class="resultado-busca-item-info">${album.banda} • ${album.ano} • ⭐ ${album.media}/10</div>
+      </div>
+    `).join('');
+  }).catch(err => {
+    console.error('Erro na busca:', err);
+    resultContainer.innerHTML = '<p style="color: var(--danger); padding: 10px;">Erro ao buscar álbuns.</p>';
+  });
+};
+
+// Event listener para a busca rápida
+if (document.getElementById('busca-rapida-stats')) {
+  document.getElementById('busca-rapida-stats').addEventListener('input', (e) => {
+    window.executarBuscaRapida(e.target.value);
+  });
+}
+
 // Lista de Wallpapers disponíveis
 const WALLPAPER_PADRAO = 'assets/andjustice.jpg';
 const wallpapers = [
