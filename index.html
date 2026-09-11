@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Avaliações de Álbuns | MusicBox</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <!-- Chart.js para os gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -87,7 +90,7 @@
             <h1>Meu MusicBox</h1>
         </div>
 
-        <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menu" aria-expanded="false">
+        <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menu" aria-expanded="false" aria-controls="nav-menu">
             <span></span>
             <span></span>
             <span></span>
@@ -108,6 +111,12 @@
             </button>
             <button class="nav-btn" data-target="sec-observacoes">
                 <span class="nav-text">Observações</span>
+            </button>
+            <button class="nav-btn" data-target="sec-bandas">
+                <span class="nav-text">Bandas</span>
+            </button>
+            <button class="nav-btn" data-target="sec-quadrinhos">
+                <span class="nav-text">Quadrinhos</span>
             </button>
             <button class="nav-btn" data-target="sec-estatisticas">
                 <span class="nav-text">Estatísticas</span>
@@ -219,6 +228,23 @@
                         <textarea id="album-obs" rows="3" placeholder="Escreva o que achou da produção, conceito, etc..."></textarea>
                     </div>
 
+                    <div class="audicao-timer" aria-label="Cronômetro de audição">
+                        <div>
+                            <span class="timer-label">Tempo de audição</span>
+                            <strong id="audicao-tempo">00:00:00</strong>
+                        </div>
+                        <div class="timer-acoes">
+                            <button type="button" id="btn-timer-iniciar" class="btn-primario btn-sm">Iniciar</button>
+                            <button type="button" id="btn-timer-pausar" class="btn-secundario btn-sm">Pausar</button>
+                            <button type="button" id="btn-timer-resetar" class="btn-secundario btn-sm">Resetar</button>
+                        </div>
+                    </div>
+
+                    <div class="grupo-campo">
+                        <label for="album-duracao">Duração / Tempo total do Álbum</label>
+                        <input type="text" id="album-duracao" placeholder="Ex: 00:39:42 ou 40 min">
+                    </div>
+
                     <!-- Seção de Faixas / Músicas -->
                     <div class="secao-faixas">
                         <div class="faixas-header">
@@ -263,7 +289,7 @@
                 </div>
             </div>
 
-            <form id="form-top5" class="glass-form">
+            <form id="form-top5" class="glass-form form-recolhivel escondido">
                 <input type="hidden" id="top5-id">
                 <div class="grupo-campo">
                     <label for="top5-titulo">Título do tema</label>
@@ -308,12 +334,17 @@
                 <button id="btn-nova-viagem" class="btn-primario btn-sm">Nova Ação</button>
             </div>
 
-            <form id="form-viagem" class="glass-form">
+            <form id="form-viagem" class="glass-form form-recolhivel escondido">
                 <input type="hidden" id="viagem-id">
 
                 <div class="grupo-campo">
                     <label for="viagem-titulo">Ação</label>
                     <input type="text" id="viagem-titulo" placeholder="Ex: Viagem Romenia" required>
+                </div>
+
+                <div class="grupo-campo">
+                    <label for="viagem-tarefas">Tarefas (separe várias por ponto e vírgula)</label>
+                    <textarea id="viagem-tarefas" rows="3" placeholder="Ride; Master; Sanitarium"></textarea>
                 </div>
 
                 <div class="form-acoes">
@@ -331,11 +362,11 @@
                 <button id="btn-nova-observacao" class="btn-primario btn-sm">Nova Anotação</button>
             </div>
 
-            <form id="form-observacao" class="glass-form">
+            <form id="form-observacao" class="glass-form form-recolhivel escondido">
                 <input type="hidden" id="obs-id">
                 <div class="grupo-campo">
                     <label for="obs-titulo">Título</label>
-                    <input type="text" id="obs-titulo" placeholder="Ex: Ideias para o projeto" required>
+                    <input type="text" id="obs-titulo" placeholder="Ex: Ideias para o projeto">
                 </div>
 
                 <div class="grupo-campo">
@@ -350,6 +381,115 @@
             </form>
 
             <div id="lista-observacoes" class="cards-grid notas-grid"></div>
+        </section>
+
+        <section id="sec-bandas" class="tela escondido">
+            <div class="secao-cabecalho">
+                <div>
+                    <h2>Bandas</h2>
+                    <p class="secao-subtitulo">Comparativo de discografias por nota média</p>
+                </div>
+            </div>
+            <div id="lista-bandas" class="bandas-grid"></div>
+        </section>
+
+        <section id="sec-quadrinhos" class="tela escondido">
+            <div class="secao-cabecalho">
+                <div>
+                    <h2>Quadrinhos &amp; Livros</h2>
+                    <p class="secao-subtitulo">Sua biblioteca de leituras</p>
+                </div>
+                <button id="btn-novo-quadrinho" class="btn-primario btn-sm">Novo Item</button>
+            </div>
+
+            <form id="form-quadrinho" class="glass-form form-recolhivel escondido">
+                <input type="hidden" id="quadrinho-id">
+                <div class="grupo-campo">
+                    <label for="quadrinho-tipo">Tipo</label>
+                    <select id="quadrinho-tipo">
+                        <option value="quadrinho">Quadrinho</option>
+                        <option value="livro">Livro</option>
+                    </select>
+                </div>
+                <div class="grupo-campo">
+                    <label for="quadrinho-titulo">Nome / Título *</label>
+                    <input type="text" id="quadrinho-titulo" required>
+                </div>
+                <div id="campos-hq" class="grid-form-2col">
+                    <div class="grupo-campo">
+                        <label for="quadrinho-editora">Marca / Editora</label>
+                        <input type="text" id="quadrinho-editora" placeholder="Marvel, DC, Panini...">
+                    </div>
+                    <div class="grupo-campo">
+                        <label for="quadrinho-personagem">Personagem / História principal</label>
+                        <input type="text" id="quadrinho-personagem" placeholder="Batman, Homem-Aranha...">
+                    </div>
+                </div>
+                <div class="grid-form-2col">
+                    <div class="grupo-campo">
+                        <label for="quadrinho-status">Status de Leitura</label>
+                        <select id="quadrinho-status">
+                            <option value="lido">Lido</option>
+                            <option value="lendo">Lendo</option>
+                            <option value="fila">Na Fila</option>
+                        </select>
+                    </div>
+                    <div class="grupo-campo">
+                        <label for="quadrinho-nota">Nota / Avaliação (0 a 10)</label>
+                        <input type="number" id="quadrinho-nota" min="0" max="10" step="0.1">
+                    </div>
+                    <div class="grupo-campo">
+                        <label for="quadrinho-paginas">Páginas</label>
+                        <input type="number" id="quadrinho-paginas" min="0" step="1" placeholder="Opcional">
+                    </div>
+                </div>
+                <div class="grid-form-2col">
+                    <div class="grupo-campo">
+                        <label for="quadrinho-inicio">Data de Início</label>
+                        <input type="datetime-local" id="quadrinho-inicio">
+                    </div>
+                    <div class="grupo-campo">
+                        <label for="quadrinho-conclusao">Data de Conclusão</label>
+                        <input type="datetime-local" id="quadrinho-conclusao">
+                    </div>
+                </div>
+                <div class="grupo-campo">
+                    <label>Capa (arquivo ou URL)</label>
+                    <div class="grupo-imagem-input">
+                        <input type="file" id="quadrinho-arquivo" accept="image/*">
+                        <input type="url" id="quadrinho-capa" placeholder="https://...">
+                    </div>
+                </div>
+                <div class="grupo-campo">
+                    <label for="quadrinho-obs">Observações</label>
+                    <textarea id="quadrinho-obs" rows="3"></textarea>
+                </div>
+                <div class="form-acoes">
+                    <button type="submit" class="btn-sucesso">Salvar Item</button>
+                    <button type="button" id="btn-cancelar-quadrinho" class="btn-secundario">Cancelar</button>
+                </div>
+            </form>
+            <div id="lista-quadrinhos" class="grid-albuns"></div>
+            <div id="paginacao-quadrinhos" class="controles-paginacao">
+                <button type="button" id="btn-pagina-quadrinhos-anterior" class="btn-secundario">Anterior</button>
+                <span id="info-pagina-quadrinhos" class="info-pag">Página 1 de 1</span>
+                <button type="button" id="btn-pagina-quadrinhos-proxima" class="btn-secundario">Próxima</button>
+            </div>
+            <button type="button" id="btn-toggle-estatisticas-leitura" class="btn-secundario btn-toggle-estatisticas">Ver Estatísticas &amp; Gráficos 📊</button>
+            <div id="leitura-estatisticas" class="leitura-estatisticas escondido">
+                <h3>Estatísticas de leitura</h3>
+                <div class="cards-stats">
+                    <div class="card"><div class="card-info"><h3>Total de HQs</h3><p id="leitura-total-hqs">0</p></div></div>
+                    <div class="card"><div class="card-info"><h3>Total de Livros</h3><p id="leitura-total-livros">0</p></div></div>
+                    <div class="card"><div class="card-info"><h3>HQs Lidas</h3><p id="leitura-hqs-lidas">0</p></div></div>
+                    <div class="card"><div class="card-info"><h3>Livros Lidos</h3><p id="leitura-livros-lidos">0</p></div></div>
+                </div>
+                <div class="grid-graficos leitura-graficos">
+                    <div class="container-grafico"><h3>Distribuição por Status de Leitura</h3><div class="canvas-wrapper"><canvas id="graficoLeituraStatus"></canvas></div></div>
+                    <div class="container-grafico"><h3>Quantidade de Obras por Editora / Marca</h3><div class="canvas-wrapper"><canvas id="graficoLeituraEditoras"></canvas></div></div>
+                    <div class="container-grafico leitura-grafico-unico"><h3>Quantidade de Obras por Personagem</h3><div class="canvas-wrapper"><canvas id="graficoLeituraPersonagens"></canvas></div></div>
+                </div>
+            </div>
         </section>
 
         <section id="sec-estatisticas" class="tela escondido">
@@ -477,6 +617,34 @@
                     <div class="card-info">
                         <h3>Mês Mais Produtivo</h3>
                         <p id="stat-mes-produtivo">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">⏳</div>
+                    <div class="card-info">
+                        <h3>Tempo Médio por Álbum</h3>
+                        <p id="stat-tempo-medio">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🕒</div>
+                    <div class="card-info">
+                        <h3>Álbum Mais Longo</h3>
+                        <p id="stat-album-longo">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">⌛</div>
+                    <div class="card-info">
+                        <h3>Álbum Mais Curto</h3>
+                        <p id="stat-album-curto">-</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📐</div>
+                    <div class="card-info">
+                        <h3>Correlação Duração x Nota</h3>
+                        <p id="stat-correlacao-duracao">-</p>
                     </div>
                 </div>
             </div>
@@ -630,30 +798,6 @@
                         <ul id="modal-lista-faixas" class="lista-faixas-view"></ul>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="modal-top5-historico" class="modal-overlay escondido" onclick="fecharModalTop5(false, event)">
-        <div class="modal-conteudo">
-            <div class="modal-cabecalho">
-                <h3>Histórico de Alterações</h3>
-                <button class="btn-fechar" onclick="fecharModalTop5(true)">X</button>
-            </div>
-            <div class="modal-corpo">
-                <div id="top5-historico-conteudo" class="historico-list"></div>
-            </div>
-        </div>
-    </div>
-
-    <div id="modal-obs-historico" class="modal-overlay escondido" onclick="fecharModalObsHistorico(false, event)">
-        <div class="modal-conteudo">
-            <div class="modal-cabecalho">
-                <h3>Histórico de Revisões</h3>
-                <button class="btn-fechar" onclick="fecharModalObsHistorico(true)">X</button>
-            </div>
-            <div class="modal-corpo">
-                <div id="obs-historico-conteudo" class="historico-list"></div>
             </div>
         </div>
     </div>

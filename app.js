@@ -1,9 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { 
-  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, updateEmail, updatePassword 
+import {
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, updateEmail, updatePassword
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
-  getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot 
+  getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -447,6 +447,13 @@ let perfilUsuarioAtual = null;
 let meuGrafico = null;
 let graficoDecadasChart = null;
 let adminChart = null;
+let leituraStatusChart = null;
+let leituraEditoraChart = null;
+let leituraPersonagensChart = null;
+let quadrinhosUnsubscribe = null;
+let quadrinhosLista = [];
+let quadrinhosPagina = 1;
+const OBRAS_POR_PAGINA = 12;
 let imagemBase64Temp = "";
 let todosOsAlbuns = [];
 let albunsFiltrados = [];
@@ -455,6 +462,8 @@ let top5ListaCompleta = [];
 let top5Unsubscribe = null;
 let viagensUnsubscribe = null;
 let observacoesUnsubscribe = null;
+let timerAudicaoSegundos = 0;
+let timerAudicaoIntervalo = null;
 const ITENS_POR_PAGINA = 12;
 const ADMIN_EMAILS = ['matheusgustavodasilvapires@gmail.com'];
 const PERFIL_USERS_COLLECTION = 'usuarios';
@@ -788,6 +797,15 @@ function mostrarToast(mensagem, tipo = 'sucesso') {
   toast.timer = setTimeout(() => toast.classList.add('escondido'), 3000);
 }
 
+function controlarFormularioRecolhivel(formId, abrir) {
+  const form = document.getElementById(formId);
+  if (form) form.classList.toggle('escondido', !abrir);
+}
+
+function fecharFormulariosSecundarios() {
+  ['form-top5', 'form-viagem', 'form-observacao'].forEach((id) => controlarFormularioRecolhivel(id, false));
+}
+
 function obterUsuarioAtivo() {
   return auth.currentUser || usuarioAtual;
 }
@@ -852,6 +870,7 @@ document.getElementById('btn-toggle-pass').addEventListener('click', () => {
 });
 
 window.navegarPara = function(idTela) {
+  fecharFormulariosSecundarios();
   document.querySelectorAll('.tela').forEach(t => t.classList.add('escondido'));
   const telaDestino = document.getElementById(idTela);
   if (telaDestino) telaDestino.classList.remove('escondido');
@@ -862,6 +881,8 @@ window.navegarPara = function(idTela) {
     'sec-top5': 'sec-top5',
     'sec-viagens': 'sec-viagens',
     'sec-observacoes': 'sec-observacoes',
+    'sec-bandas': 'sec-bandas',
+    'sec-quadrinhos': 'sec-quadrinhos',
     'sec-estatisticas': 'sec-estatisticas',
     'sec-admin': 'sec-admin'
   };
@@ -876,6 +897,8 @@ window.navegarPara = function(idTela) {
   fecharMenuMobile();
 
   if (idTela === 'sec-dashboard') carregarAlbuns();
+  if (idTela === 'sec-bandas') carregarBandas();
+  if (idTela === 'sec-quadrinhos') carregarQuadrinhosLivros();
   if (idTela === 'sec-estatisticas') carregarEstatisticas();
   if (idTela === 'sec-admin') renderAdminDashboard();
 };
@@ -887,6 +910,7 @@ window.prepararNovoAlbum = function() {
   document.getElementById('preview-container').classList.add('escondido');
   document.getElementById('form-titulo').innerText = 'Novo Álbum';
   imagemBase64Temp = "";
+  resetarTimerAudicao();
   addLinhaFaixa();
   navegarPara('sec-novo-album');
 };
@@ -953,6 +977,8 @@ onAuthStateChanged(auth, async (user) => {
   if (top5Unsubscribe) top5Unsubscribe();
   if (viagensUnsubscribe) viagensUnsubscribe();
   if (observacoesUnsubscribe) observacoesUnsubscribe();
+  if (quadrinhosUnsubscribe) quadrinhosUnsubscribe();
+  quadrinhosUnsubscribe = null;
 
   if (user) {
     usuarioAtual = user;
@@ -1095,7 +1121,6 @@ window.aplicarFiltrosTop5 = function() {
         <div class="card-acoes">
           <button type="button" class="btn-alerta" data-top5-editar="${top.id}">Editar</button>
           <button type="button" class="btn-perigo" data-top5-excluir="${top.id}">Excluir</button>
-          <button type="button" class="btn-obs" data-top5-historico="${top.id}">Histórico</button>
         </div>
       </div>
     `;
@@ -1105,12 +1130,14 @@ window.aplicarFiltrosTop5 = function() {
 document.getElementById('btn-novo-top5').addEventListener('click', () => {
   document.getElementById('form-top5').reset();
   document.getElementById('top5-id').value = '';
+  controlarFormularioRecolhivel('form-top5', true);
   document.getElementById('top5-titulo').focus();
 });
 
 document.getElementById('btn-cancelar-top5').addEventListener('click', () => {
   document.getElementById('form-top5').reset();
   document.getElementById('top5-id').value = '';
+  controlarFormularioRecolhivel('form-top5', false);
 });
 
 document.getElementById('form-top5').addEventListener('submit', async (e) => {
@@ -1130,19 +1157,10 @@ document.getElementById('form-top5').addEventListener('submit', async (e) => {
     if (id) {
       const docSnap = await getDoc(doc(db, 'viagens', id));
       const antigo = docSnap.data() || {};
-      const mensagem = `Alteração em “${antigo.titulo || 'Top 5'}” para “${titulo}”. Itens atualizados.`;
-      const logsExistentes = Array.isArray(antigo.historicoLogs) ? antigo.historicoLogs : [];
       await updateDoc(doc(db, 'viagens', id), {
         titulo,
         itens,
-        atualizadoEm: serverTimestamp(),
-        historicoLogs: [
-          ...logsExistentes,
-          {
-            data: new Date().toISOString(),
-            alteracao: mensagem
-          }
-        ]
+        atualizadoEm: serverTimestamp()
       });
       mostrarToast('Top 5 atualizado!');
     } else {
@@ -1154,17 +1172,14 @@ document.getElementById('form-top5').addEventListener('submit', async (e) => {
         realizado: false,
         realizadaEm: null,
         criadoEm: serverTimestamp(),
-        atualizadoEm: serverTimestamp(),
-        historicoLogs: [{
-          data: new Date().toISOString(),
-          alteracao: 'Top 5 criado.'
-        }]
+        atualizadoEm: serverTimestamp()
       });
       mostrarToast('Top 5 salvo com sucesso!');
     }
 
     document.getElementById('form-top5').reset();
     document.getElementById('top5-id').value = '';
+    controlarFormularioRecolhivel('form-top5', false);
   } catch (erro) {
     console.error('Erro ao salvar Top 5:', erro);
     mostrarToast('Erro ao salvar o Top 5', 'erro');
@@ -1174,7 +1189,6 @@ document.getElementById('form-top5').addEventListener('submit', async (e) => {
 document.getElementById('lista-top5').addEventListener('click', async (event) => {
   const editarId = event.target.dataset.top5Editar;
   const excluirId = event.target.dataset.top5Excluir;
-  const historicoId = event.target.dataset.top5Historico;
 
   if (editarId) {
     const docSnap = await getDoc(doc(db, 'viagens', editarId));
@@ -1187,6 +1201,7 @@ document.getElementById('lista-top5').addEventListener('click', async (event) =>
       document.getElementById(`top5-item-${numero}`).value = (dados.itens && dados.itens[numero - 1]) || '';
     });
 
+    controlarFormularioRecolhivel('form-top5', true);
     document.getElementById('top5-titulo').focus();
   }
 
@@ -1197,41 +1212,9 @@ document.getElementById('lista-top5').addEventListener('click', async (event) =>
     }
   }
 
-  if (historicoId) {
-    const docSnap = await getDoc(doc(db, 'viagens', historicoId));
-    const dados = docSnap.data() || {};
-    const logs = Array.isArray(dados.historicoLogs) ? dados.historicoLogs : [];
-    const container = document.getElementById('top5-historico-conteudo');
-    if (!container) return;
-    container.innerHTML = logs.length
-      ? logs.map(item => `<div class="historico-item"><small>${formatarDataHora(item.data)}</small><div>${item.alteracao || 'Sem descrição'}</div></div>`).join('')
-      : '<p>Sem histórico de alterações.</p>';
-    document.getElementById('modal-top5-historico').classList.remove('escondido');
-  }
 });
 
-window.fecharModalTop5 = function(forcar = false, evento = null) {
-  const modal = document.getElementById('modal-top5-historico');
-  if (!modal) return;
-  if (forcar || (evento && evento.target === modal)) modal.classList.add('escondido');
-};
-
 // VIAGENS
-function addLinhaTarefa(texto = '', concluida = false, criadoEm = null) {
-  const container = document.getElementById('container-viagem-tarefas');
-  const row = document.createElement('div');
-  row.className = 'tarefa-input-row';
-  row.innerHTML = `
-    <input type="text" value="${texto}" class="tarefa-input" placeholder="Ex: Comprar passagens" ${concluida ? 'readonly' : ''}>
-    <button type="button" class="btn-perigo btn-remove-tarefa">X</button>
-  `;
-
-  if (criadoEm) row.dataset.criadoEm = String(criadoEm);
-  if (concluida) row.dataset.concluida = 'true';
-  row.querySelector('.btn-remove-tarefa').addEventListener('click', () => row.remove());
-  container.appendChild(row);
-}
-
 function subscribeViagens() {
   if (!usuarioAtual) return;
 
@@ -1261,6 +1244,9 @@ function subscribeViagens() {
     container.innerHTML = lista.map((viagem) => {
       const realizada = Boolean(viagem.realizada);
       const marcadaEm = viagem.realizadaEm ? formatarDataHora(viagem.realizadaEm) : 'Ainda não marcada';
+      const tarefas = Array.isArray(viagem.tarefas) && viagem.tarefas.length
+        ? viagem.tarefas
+        : [{ texto: viagem.titulo || 'Ação', concluida: realizada }];
 
       return `
         <div class="viagem-card ${realizada ? 'viagem-feita' : ''}">
@@ -1269,10 +1255,14 @@ function subscribeViagens() {
             <span class="badge-duracao ${realizada ? 'feito' : ''}">${realizada ? 'Concluída' : 'Pendente'}</span>
           </div>
 
-          <label class="viagem-status-row">
-            <input type="checkbox" data-viagem-toggle="${viagem.id}" ${realizada ? 'checked' : ''}>
-            <span>Marcar como feita</span>
-          </label>
+          <div class="lista-tarefas-card">
+            ${tarefas.map((tarefa, index) => `
+              <label class="viagem-status-row">
+                <input type="checkbox" data-tarefa-toggle="${viagem.id}" data-tarefa-index="${index}" ${tarefa.concluida ? 'checked' : ''}>
+                <span>${escaparTextoLog(tarefa.texto || `Tarefa ${index + 1}`)}</span>
+              </label>
+            `).join('')}
+          </div>
 
           <div class="viagem-status-data">
             ${realizada ? `Realizada em: ${marcadaEm}` : `Data da realização: ${marcadaEm}`}
@@ -1295,12 +1285,14 @@ function subscribeViagens() {
 document.getElementById('btn-nova-viagem').addEventListener('click', () => {
   document.getElementById('form-viagem').reset();
   document.getElementById('viagem-id').value = '';
+  controlarFormularioRecolhivel('form-viagem', true);
   document.getElementById('viagem-titulo').focus();
 });
 
 document.getElementById('btn-cancelar-viagem').addEventListener('click', () => {
   document.getElementById('form-viagem').reset();
   document.getElementById('viagem-id').value = '';
+  controlarFormularioRecolhivel('form-viagem', false);
 });
 
 document.getElementById('form-viagem').addEventListener('submit', async (e) => {
@@ -1310,6 +1302,11 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
   const usuarioAtivo = obterUsuarioAtivo();
   const id = document.getElementById('viagem-id').value;
   const titulo = document.getElementById('viagem-titulo').value.trim();
+  const tarefas = document.getElementById('viagem-tarefas').value
+    .split(';')
+    .map((texto) => texto.trim())
+    .filter(Boolean)
+    .map((texto) => ({ texto, concluida: false }));
 
   if (!titulo) {
     return mostrarToast('Informe o nome da viagem.', 'erro');
@@ -1317,9 +1314,12 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
 
   try {
     if (id) {
+      const viagemAnterior = (await getDoc(doc(db, 'viagens', id))).data() || {};
+      const tarefasAtualizadas = tarefas.length ? tarefas : [{ texto: titulo, concluida: false }];
       await updateDoc(doc(db, 'viagens', id), {
         categoria: 'viagem',
         titulo,
+        tarefas: tarefasAtualizadas,
         atualizadoEm: serverTimestamp()
       });
       mostrarToast('Viagem atualizada!');
@@ -1327,6 +1327,7 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
       await addDoc(collection(db, 'viagens'), {
         categoria: 'viagem',
         titulo,
+        tarefas: tarefas.length ? tarefas : [{ texto: titulo, concluida: false }],
         userId: usuarioAtivo.uid,
         realizada: false,
         realizadaEm: null,
@@ -1338,6 +1339,7 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
 
     document.getElementById('form-viagem').reset();
     document.getElementById('viagem-id').value = '';
+    controlarFormularioRecolhivel('form-viagem', false);
   } catch (erro) {
     console.error('Erro ao salvar viagem:', erro);
     mostrarToast('Erro ao salvar viagem.', 'erro');
@@ -1355,6 +1357,8 @@ document.getElementById('lista-viagens').addEventListener('click', async (event)
 
     document.getElementById('viagem-id').value = editarId;
     document.getElementById('viagem-titulo').value = dados.titulo || '';
+    document.getElementById('viagem-tarefas').value = (dados.tarefas || []).map((tarefa) => tarefa.texto).join('; ');
+    controlarFormularioRecolhivel('form-viagem', true);
     document.getElementById('viagem-titulo').focus();
   }
 
@@ -1367,20 +1371,30 @@ document.getElementById('lista-viagens').addEventListener('click', async (event)
 });
 
 document.getElementById('lista-viagens').addEventListener('change', async (event) => {
-  const checkbox = event.target.closest('[data-viagem-toggle]');
+  const checkbox = event.target.closest('[data-tarefa-toggle]');
   if (!checkbox) return;
 
-  const viagemId = checkbox.dataset.viagemToggle;
-  const concluida = checkbox.checked;
+  const viagemId = checkbox.dataset.tarefaToggle;
+  const tarefaIndex = Number(checkbox.dataset.tarefaIndex);
+  const viagemDoc = await getDoc(doc(db, 'viagens', viagemId));
+  if (!viagemDoc.exists()) return;
+  const viagem = viagemDoc.data();
+  const tarefas = Array.isArray(viagem.tarefas) && viagem.tarefas.length
+    ? viagem.tarefas
+    : [{ texto: viagem.titulo || 'Ação', concluida: false }];
+  if (!tarefas[tarefaIndex]) return;
+  tarefas[tarefaIndex].concluida = checkbox.checked;
+  const todasConcluidas = tarefas.every((tarefa) => tarefa.concluida);
 
   await updateDoc(doc(db, 'viagens', viagemId), {
     categoria: 'viagem',
-    realizada: concluida,
-    realizadaEm: concluida ? serverTimestamp() : null,
+    tarefas,
+    realizada: todasConcluidas,
+    realizadaEm: todasConcluidas ? serverTimestamp() : null,
     atualizadoEm: serverTimestamp()
   });
 
-  mostrarToast(concluida ? 'Viagem marcada como feita!' : 'Viagem reaberta.');
+  mostrarToast(checkbox.checked ? 'Tarefa concluída!' : 'Tarefa reaberta.');
 });
 
 // OBSERVAÇÕES
@@ -1421,7 +1435,6 @@ function subscribeObservacoes() {
         <div class="card-acoes">
           <button type="button" class="btn-alerta" data-obs-editar="${nota.id}">Editar</button>
           <button type="button" class="btn-perigo" data-obs-excluir="${nota.id}">Excluir</button>
-          <button type="button" class="btn-obs" data-obs-historico="${nota.id}">Histórico</button>
         </div>
       </div>
     `).join('');
@@ -1431,12 +1444,14 @@ function subscribeObservacoes() {
 document.getElementById('btn-nova-observacao').addEventListener('click', () => {
   document.getElementById('form-observacao').reset();
   document.getElementById('obs-id').value = '';
+  controlarFormularioRecolhivel('form-observacao', true);
   document.getElementById('obs-titulo').focus();
 });
 
 document.getElementById('btn-cancelar-observacao').addEventListener('click', () => {
   document.getElementById('form-observacao').reset();
   document.getElementById('obs-id').value = '';
+  controlarFormularioRecolhivel('form-observacao', false);
 });
 
 document.getElementById('form-observacao').addEventListener('submit', async (e) => {
@@ -1445,32 +1460,21 @@ document.getElementById('form-observacao').addEventListener('submit', async (e) 
 
   const usuarioAtivo = obterUsuarioAtivo();
   const id = document.getElementById('obs-id').value;
-  const titulo = document.getElementById('obs-titulo').value.trim();
-  const conteudo = document.getElementById('obs-conteudo').value.trim();
+  const tituloInformado = document.getElementById('obs-titulo').value;
+  const titulo = tituloInformado.trim() || 'Sem título';
+  const conteudo = document.getElementById('obs-conteudo').value;
 
-  if (!titulo || !conteudo) {
+  if (!conteudo.trim()) {
     return mostrarToast('Preencha título e conteúdo da anotação.', 'erro');
   }
 
   try {
     if (id) {
       const docSnap = await getDoc(doc(db, 'viagens', id));
-      const antiga = docSnap.data() || {};
-      const textoAnterior = antiga.conteudo || '';
-      const tituloAnterior = antiga.titulo || '';
-      const alteracao = `Título: ${tituloAnterior} -> ${titulo} | Conteúdo: ${textoAnterior} -> ${conteudo}`;
-      const logsExistentes = Array.isArray(antiga.historicoLogs) ? antiga.historicoLogs : [];
       await updateDoc(doc(db, 'viagens', id), {
         titulo,
         conteudo,
-        atualizadoEm: serverTimestamp(),
-        historicoLogs: [
-          ...logsExistentes,
-          {
-            data: new Date().toISOString(),
-            alteracao
-          }
-        ]
+        atualizadoEm: serverTimestamp()
       });
       mostrarToast('Anotação atualizada!');
     } else {
@@ -1482,17 +1486,14 @@ document.getElementById('form-observacao').addEventListener('submit', async (e) 
         realizado: false,
         realizadaEm: null,
         criadoEm: serverTimestamp(),
-        atualizadoEm: serverTimestamp(),
-        historicoLogs: [{
-          data: new Date().toISOString(),
-          alteracao: 'Observação criada.'
-        }]
+        atualizadoEm: serverTimestamp()
       });
       mostrarToast('Anotação salva!');
     }
 
     document.getElementById('form-observacao').reset();
     document.getElementById('obs-id').value = '';
+    controlarFormularioRecolhivel('form-observacao', false);
   } catch (erro) {
     console.error('Erro ao salvar observação:', erro);
     mostrarToast('Erro ao salvar observação.', 'erro');
@@ -1502,7 +1503,6 @@ document.getElementById('form-observacao').addEventListener('submit', async (e) 
 document.getElementById('lista-observacoes').addEventListener('click', async (event) => {
   const editarId = event.target.dataset.obsEditar;
   const excluirId = event.target.dataset.obsExcluir;
-  const historicoId = event.target.dataset.obsHistorico;
 
   if (editarId) {
     const docSnap = await getDoc(doc(db, 'viagens', editarId));
@@ -1511,6 +1511,7 @@ document.getElementById('lista-observacoes').addEventListener('click', async (ev
     document.getElementById('obs-id').value = editarId;
     document.getElementById('obs-titulo').value = dados.titulo || '';
     document.getElementById('obs-conteudo').value = dados.conteudo || '';
+    controlarFormularioRecolhivel('form-observacao', true);
     document.getElementById('obs-titulo').focus();
   }
 
@@ -1521,33 +1522,7 @@ document.getElementById('lista-observacoes').addEventListener('click', async (ev
     }
   }
 
-  if (historicoId) {
-    const docSnap = await getDoc(doc(db, 'viagens', historicoId));
-    const dados = docSnap.data() || {};
-    const logs = Array.isArray(dados.historicoLogs) ? dados.historicoLogs : [];
-    const container = document.getElementById('obs-historico-conteudo');
-    if (!container) return;
-    container.innerHTML = logs.length
-      ? logs.map(item => `<div class="historico-item"><small>${formatarDataHora(item.data)}</small><div>${item.alteracao || 'Sem descrição'}</div></div>`).join('')
-      : '<p>Sem histórico de revisões.</p>';
-    document.getElementById('modal-obs-historico').classList.remove('escondido');
-  }
 });
-
-window.fecharModalObsHistorico = function(forcar = false, evento = null) {
-  const modal = document.getElementById('modal-obs-historico');
-  if (!modal) return;
-  if (forcar || (evento && evento.target === modal)) modal.classList.add('escondido');
-};
-
-// inicialização básica das listas de forma segura
-if (document.readyState !== 'loading') {
-  const tarefasContainerInicial = document.getElementById('container-viagem-tarefas');
-  if (tarefasContainerInicial) {
-    tarefasContainerInicial.innerHTML = '';
-    tarefasContainerInicial.appendChild(Object.assign(document.createElement('div'), { className: 'tarefa-input-row' }));
-  }
-}
 
 // UPLOAD DE IMAGEM
 document.getElementById('album-file').addEventListener('change', (e) => {
@@ -1583,18 +1558,110 @@ document.getElementById('album-file').addEventListener('change', (e) => {
 const containerFaixas = document.getElementById('container-faixas');
 document.getElementById('btn-add-faixa').addEventListener('click', () => addLinhaFaixa());
 
+function formatarDuracao(segundos) {
+  const horas = Math.floor(segundos / 3600).toString().padStart(2, '0');
+  const minutos = Math.floor((segundos % 3600) / 60).toString().padStart(2, '0');
+  const segundosRestantes = Math.floor(segundos % 60).toString().padStart(2, '0');
+  return `${horas}:${minutos}:${segundosRestantes}`;
+}
+
+function converterDuracaoParaSegundos(valor, fallback = 0) {
+  const texto = String(valor ?? '').trim().toLowerCase();
+  if (!texto) return Number(fallback) || 0;
+
+  if (texto.includes(':')) {
+    const partes = texto.split(':').map((parte) => Number(parte.replace(',', '.')) || 0);
+    if (partes.length === 3) return Math.max(0, Math.round(partes[0] * 3600 + partes[1] * 60 + partes[2]));
+    if (partes.length === 2) return Math.max(0, Math.round(partes[0] * 60 + partes[1]));
+  }
+
+  const unidades = [...texto.matchAll(/(\d+(?:[.,]\d+)?)\s*(h|hora?s?|m|minuto?s?|s|segundo?s?)/gi)];
+  if (unidades.length) {
+    return Math.max(0, Math.round(unidades.reduce((total, [, numero, unidade]) => {
+      const valorNumerico = Number(numero.replace(',', '.')) || 0;
+      if (unidade.startsWith('h')) return total + valorNumerico * 3600;
+      if (unidade.startsWith('m')) return total + valorNumerico * 60;
+      return total + valorNumerico;
+    }, 0)));
+  }
+
+  const numero = Number(texto.replace(',', '.'));
+  return Number.isFinite(numero) && numero > 0 ? Math.round(numero * 60) : 0;
+}
+
+function atualizarDisplayTimer() {
+  const display = document.getElementById('audicao-tempo');
+  const duracaoFormatada = formatarDuracao(timerAudicaoSegundos);
+  if (display) display.textContent = duracaoFormatada;
+  const campoDuracao = document.getElementById('album-duracao');
+  if (campoDuracao && timerAudicaoSegundos > 0) campoDuracao.value = duracaoFormatada;
+}
+
+function iniciarTimerAudicao() {
+  if (timerAudicaoIntervalo) return;
+  timerAudicaoIntervalo = window.setInterval(() => {
+    timerAudicaoSegundos += 1;
+    atualizarDisplayTimer();
+  }, 1000);
+}
+
+function pausarTimerAudicao() {
+  if (!timerAudicaoIntervalo) return;
+  window.clearInterval(timerAudicaoIntervalo);
+  timerAudicaoIntervalo = null;
+}
+
+function resetarTimerAudicao() {
+  pausarTimerAudicao();
+  timerAudicaoSegundos = 0;
+  atualizarDisplayTimer();
+  const campoDuracao = document.getElementById('album-duracao');
+  if (campoDuracao) campoDuracao.value = '';
+}
+
+function definirTimerAudicao(segundos = 0) {
+  pausarTimerAudicao();
+  timerAudicaoSegundos = Math.max(0, Number(segundos) || 0);
+  atualizarDisplayTimer();
+}
+
+document.getElementById('btn-timer-iniciar').addEventListener('click', iniciarTimerAudicao);
+document.getElementById('btn-timer-pausar').addEventListener('click', pausarTimerAudicao);
+document.getElementById('btn-timer-resetar').addEventListener('click', resetarTimerAudicao);
+
 function addLinhaFaixa(nome = '', nota = 'Boa') {
   const div = document.createElement('div');
   div.className = 'linha-faixa';
+  const nomeInicial = nome || `Faixa ${containerFaixas.children.length + 1}`;
+  const ehNomePadrao = !nome || /^Faixa \d+$/.test(nomeInicial);
+  div.dataset.nomePadrao = ehNomePadrao ? 'true' : 'false';
   div.innerHTML = `
-    <input type="text" placeholder="Nome da música (opcional)" value="${nome}" class="faixa-nome">
+    <input type="text" placeholder="Faixa ${containerFaixas.children.length + 1}" value="${nomeInicial}" class="faixa-nome">
     <select class="faixa-nota">
       ${Object.keys(PESO_NOTAS).map(k => `<option value="${k}" ${k === nota ? 'selected' : ''}>${k} (${PESO_NOTAS[k]})</option>`).join('')}
     </select>
-    <button type="button" onclick="this.parentElement.remove()" class="btn-perigo">X</button>
+    <button type="button" onclick="removerLinhaFaixa(this)" class="btn-perigo">X</button>
   `;
+  div.querySelector('.faixa-nome').addEventListener('input', (event) => {
+    div.dataset.nomePadrao = event.target.value.trim() === '' || /^Faixa \d+$/.test(event.target.value.trim()) ? 'true' : 'false';
+  });
   containerFaixas.appendChild(div);
 }
+
+function renumerarFaixasPadrao() {
+  Array.from(containerFaixas.children).forEach((linha, index) => {
+    const input = linha.querySelector('.faixa-nome');
+    if (linha.dataset.nomePadrao === 'true' && input) {
+      input.value = `Faixa ${index + 1}`;
+      input.placeholder = `Faixa ${index + 1}`;
+    }
+  });
+}
+
+window.removerLinhaFaixa = function(botao) {
+  botao.closest('.linha-faixa')?.remove();
+  renumerarFaixasPadrao();
+};
 
 // SALVAR ÁLBUM
 document.getElementById('form-album').addEventListener('submit', async (e) => {
@@ -1612,6 +1679,8 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     const urlImagemInput = document.getElementById('album-imagem').value;
     const favorita = document.getElementById('album-favorita').value;
     const obs = document.getElementById('album-obs').value;
+    const duracao = document.getElementById('album-duracao').value.trim();
+    const duracaoSegundos = converterDuracaoParaSegundos(duracao, timerAudicaoSegundos);
 
     const imagemFinal = imagemBase64Temp || urlImagemInput || '';
     const faixasInputs = document.querySelectorAll('.linha-faixa');
@@ -1639,7 +1708,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     if (id) {
       const updateData = {
         nome, banda, ano, imagem: imagemFinal, favorita, obs, faixas,
-        media, somaNotas, nmp, atualizadoEm: agoraISO
+        media, somaNotas, nmp, duracao, duracaoSegundos, atualizadoEm: agoraISO
       };
       await updateDoc(doc(db, "albuns", id), updateData);
       mostrarToast("Álbum atualizado com sucesso!");
@@ -1648,6 +1717,8 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       const novoData = {
         nome, banda, ano, imagem: imagemFinal, favorita, obs, faixas,
         media, somaNotas, nmp,
+        duracao,
+        duracaoSegundos,
         idadeNoCadastro: idadeCadastro,
         criadoEm: agoraISO,
         atualizadoEm: agoraISO,
@@ -1737,7 +1808,7 @@ function renderizarPagina() {
     const dataEdicao = data.atualizadoEm ? new Date(data.atualizadoEm).toLocaleDateString('pt-BR') : 'N/A';
 
     const temObs = data.obs && data.obs.trim().length > 0;
-    const obsSanitizada = temObs ? data.obs.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
+    const duracaoAlbum = String(data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '')).trim();
 
     const card = document.createElement('div');
     card.className = 'card-album';
@@ -1756,9 +1827,10 @@ function renderizarPagina() {
       <p><strong>Soma das Notas:</strong> ${data.somaNotas ?? 'N/A'}</p>
       <p><strong>Música favorita:</strong> ${data.favorita || 'N/A'}</p>
       <p><strong>Faixas:</strong> ${data.faixas.length}</p>
+      ${duracaoAlbum ? `<p><strong>Duração:</strong> ${escaparHtml(duracaoAlbum)}</p>` : ''}
       <p><strong>Idade no cadastro:</strong> ${data.idadeNoCadastro ?? 'N/A'} anos</p>
 
-      ${temObs ? `<button type="button" class="btn-obs" onclick="abrirModalObs('${obsSanitizada}')">Ver observações</button>` : ''}
+      ${temObs ? `<button type="button" class="btn-obs" data-album-obs="${data.id}">Ver observações</button>` : ''}
 
       <div class="card-datas">
         Cadastrado: ${dataCriacao}<br>
@@ -1778,6 +1850,13 @@ function renderizarPagina() {
   document.getElementById('btn-pag-prox').disabled = (paginaAtual === totalPaginas);
 }
 
+document.getElementById('lista-albuns')?.addEventListener('click', async (event) => {
+  const botao = event.target.closest('[data-album-obs]');
+  if (!botao) return;
+  const album = await getDoc(doc(db, 'albuns', botao.dataset.albumObs));
+  if (album.exists()) window.abrirModalObs(album.data().obs || 'Nenhuma observação registrada.');
+});
+
 window.mudarPagina = function(direcao) {
   paginaAtual += direcao;
   renderizarPagina();
@@ -1796,6 +1875,8 @@ window.editarAlbum = async function(id) {
     document.getElementById('album-ano').value = data.ano;
     document.getElementById('album-favorita').value = data.favorita || '';
     document.getElementById('album-obs').value = data.obs || '';
+    definirTimerAudicao(data.duracaoSegundos || 0);
+    document.getElementById('album-duracao').value = data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '');
 
     if (data.imagem) {
       if (data.imagem.startsWith('data:image')) {
@@ -1822,6 +1903,334 @@ window.editarAlbum = async function(id) {
   }
 };
 
+function escaparHtml(valor = '') {
+  return String(valor).replace(/[&<>'"]/g, (caractere) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  }[caractere]));
+}
+
+async function carregarBandas() {
+  const container = document.getElementById('lista-bandas');
+  if (!container || !usuarioAtual) return;
+
+  container.innerHTML = '<p class="empty-state">Carregando discografias...</p>';
+
+  try {
+    const snapshot = await getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid)));
+    const grupos = new Map();
+
+    snapshot.forEach((docSnap) => {
+      const album = { id: docSnap.id, ...docSnap.data() };
+      const nomeBanda = (album.banda || 'Banda não informada').trim();
+      if (!grupos.has(nomeBanda)) grupos.set(nomeBanda, []);
+      grupos.get(nomeBanda).push(album);
+    });
+
+    const bandas = Array.from(grupos.entries()).map(([nome, albuns]) => ({
+      nome,
+      albuns: albuns.sort((a, b) => Number(a.ano || 0) - Number(b.ano || 0)),
+      media: albuns.reduce((total, album) => total + Number(album.media || 0), 0) / albuns.length
+    })).sort((a, b) => b.media - a.media);
+
+    if (!bandas.length) {
+      container.innerHTML = '<p class="empty-state">Cadastre um álbum para visualizar as discografias.</p>';
+      return;
+    }
+
+    container.innerHTML = bandas.map((banda) => `
+      <article class="banda-card">
+        <div class="banda-card-header">
+          <div>
+            <h3>${escaparHtml(banda.nome)}</h3>
+            <p>${banda.albuns.length} álbum(ns) na coleção</p>
+          </div>
+          <strong class="banda-media">${banda.media.toFixed(2)}<small>/10</small></strong>
+        </div>
+        <div class="discografia-grafico" aria-label="Notas da discografia de ${escaparHtml(banda.nome)}">
+          ${banda.albuns.map((album) => {
+            const nota = Math.max(0, Math.min(10, Number(album.media || 0)));
+            return `
+              <div class="barra-album">
+                <div class="barra-album-meta">
+                  <span title="${escaparHtml(album.nome || 'Álbum sem nome')}">${escaparHtml(album.nome || 'Álbum sem nome')} - ${escaparHtml(album.ano || 'N/A')}</span>
+                  <strong>${nota.toFixed(1)}</strong>
+                </div>
+                <div class="barra-album-trilho"><span style="width: ${nota * 10}%"></span></div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </article>
+    `).join('');
+  } catch (erro) {
+    console.error('Erro ao carregar bandas:', erro);
+    container.innerHTML = '<p class="empty-state">Não foi possível carregar as discografias.</p>';
+  }
+}
+
+function calcularTempoLeitura(inicio, conclusao) {
+  const dataInicio = new Date(inicio);
+  const dataConclusao = new Date(conclusao);
+  if (!inicio || !conclusao || Number.isNaN(dataInicio.getTime()) || Number.isNaN(dataConclusao.getTime()) || dataConclusao < dataInicio) return null;
+
+  let cursor = new Date(dataInicio);
+  let anos = 0;
+  let meses = 0;
+  while (new Date(cursor.getFullYear() + 1, cursor.getMonth(), cursor.getDate(), cursor.getHours(), cursor.getMinutes(), cursor.getSeconds()) <= dataConclusao) {
+    cursor.setFullYear(cursor.getFullYear() + 1);
+    anos += 1;
+  }
+  while (new Date(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate(), cursor.getHours(), cursor.getMinutes(), cursor.getSeconds()) <= dataConclusao) {
+    cursor.setMonth(cursor.getMonth() + 1);
+    meses += 1;
+  }
+  let segundos = Math.floor((dataConclusao - cursor) / 1000);
+  const dias = Math.floor(segundos / 86400);
+  segundos %= 86400;
+  const horas = Math.floor(segundos / 3600);
+  segundos %= 3600;
+  const minutos = Math.floor(segundos / 60);
+  segundos %= 60;
+  const partes = [];
+  if (anos) partes.push(`${anos} ano${anos === 1 ? '' : 's'}`);
+  if (meses) partes.push(`${meses} mês${meses === 1 ? '' : 'es'}`);
+  if (dias) partes.push(`${dias} dia${dias === 1 ? '' : 's'}`);
+  if (horas) partes.push(`${horas} hora${horas === 1 ? '' : 's'}`);
+  if (minutos) partes.push(`${minutos} min`);
+  if (segundos || !partes.length) partes.push(`${segundos} seg`);
+  return { segundosTotais: Math.floor((dataConclusao - dataInicio) / 1000), texto: partes.join(', ') };
+}
+
+function lerArquivoComoDataUrl(input) {
+  const arquivo = input?.files?.[0];
+  if (!arquivo) return Promise.resolve('');
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(leitor.result);
+    leitor.onerror = reject;
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+function formatarStatusLeitura(status) {
+  return ({ lido: 'Lido', lendo: 'Lendo', fila: 'Na Fila' })[status] || status || 'Na Fila';
+}
+
+function renderizarQuadrinhosLivros(lista) {
+  const container = document.getElementById('lista-quadrinhos');
+  if (!container) return;
+  const totalPaginas = Math.max(1, Math.ceil(lista.length / OBRAS_POR_PAGINA));
+  quadrinhosPagina = Math.min(Math.max(1, quadrinhosPagina), totalPaginas);
+  const inicio = (quadrinhosPagina - 1) * OBRAS_POR_PAGINA;
+  const pagina = lista.slice(inicio, inicio + OBRAS_POR_PAGINA);
+  container.innerHTML = pagina.length ? pagina.map((item) => `
+    <article class="card-album leitura-card">
+      ${item.capa ? `<img src="${escaparHtml(item.capa)}" alt="Capa de ${escaparHtml(item.titulo)}">` : ''}
+      <div class="card-cabecalho"><span class="badge-nmp">${item.tipo === 'livro' ? 'Livro' : 'Quadrinho'}</span><span class="nota-badge">${item.nota ?? '-'}/10</span></div>
+      <h3>${escaparHtml(item.titulo)}</h3>
+      <p class="album-artist">${escaparHtml(item.editora || 'Editora não informada')}</p>
+      <p>Status: ${formatarStatusLeitura(item.status)}</p>
+      ${Number(item.paginas) > 0 ? `<p>Páginas: ${Number(item.paginas)}</p>` : ''}
+      ${item.tempoLeituraTexto ? `<p>Tempo de leitura: ${escaparHtml(item.tempoLeituraTexto)}</p>` : ''}
+      ${item.personagem ? `<p>História: ${escaparHtml(item.personagem)}</p>` : ''}
+      <div class="card-acoes"><button type="button" class="btn-alerta" data-leitura-editar="${item.id}">Editar</button><button type="button" class="btn-perigo" data-leitura-excluir="${item.id}">Excluir</button></div>
+    </article>
+  `).join('') : '<p class="empty-state">Nenhum quadrinho ou livro cadastrado.</p>';
+  const info = document.getElementById('info-pagina-quadrinhos');
+  const anterior = document.getElementById('btn-pagina-quadrinhos-anterior');
+  const proxima = document.getElementById('btn-pagina-quadrinhos-proxima');
+  if (info) info.textContent = `Página ${quadrinhosPagina} de ${totalPaginas}`;
+  if (anterior) anterior.disabled = quadrinhosPagina <= 1;
+  if (proxima) proxima.disabled = quadrinhosPagina >= totalPaginas;
+}
+
+function renderizarEstatisticasLeitura(lista) {
+  const hqs = lista.filter((item) => String(item.tipo || '').toLowerCase() === 'quadrinho');
+  const livros = lista.filter((item) => String(item.tipo || '').toLowerCase() === 'livro');
+  document.getElementById('leitura-total-hqs').textContent = hqs.length;
+  document.getElementById('leitura-total-livros').textContent = livros.length;
+  document.getElementById('leitura-hqs-lidas').textContent = hqs.filter((item) => item.status === 'lido').length;
+  document.getElementById('leitura-livros-lidos').textContent = livros.filter((item) => item.status === 'lido').length;
+
+  const statusConfig = [
+    { chave: 'lido', rotulo: 'Lido' },
+    { chave: 'lendo', rotulo: 'Lendo' },
+    { chave: 'fila', rotulo: 'Na Fila' }
+  ];
+  const statusDados = statusConfig.map(({ chave }) => lista.filter((item) => String(item.status || 'fila').toLowerCase() === chave).length);
+  const editorasMap = new Map();
+  lista.forEach((item) => {
+    const editora = String(item.editora || '').trim() || 'Outras';
+    editorasMap.set(editora, (editorasMap.get(editora) || 0) + 1);
+  });
+  const editorasOrdenadas = [...editorasMap.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  const contagemPersonagens = new Map();
+  lista.forEach((item) => {
+    const personagem = String(item.personagem || '').trim() || 'Sem personagem';
+    contagemPersonagens.set(personagem, (contagemPersonagens.get(personagem) || 0) + 1);
+  });
+  const personagensOrdenados = [...contagemPersonagens.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (leituraStatusChart) leituraStatusChart.destroy();
+  if (leituraEditoraChart) leituraEditoraChart.destroy();
+  if (leituraPersonagensChart) leituraPersonagensChart.destroy();
+
+  const contextoStatus = document.getElementById('graficoLeituraStatus')?.getContext('2d');
+  if (contextoStatus) {
+    leituraStatusChart = new Chart(contextoStatus, {
+      type: 'doughnut',
+      data: {
+        labels: statusConfig.map(({ rotulo }) => rotulo),
+        datasets: [{ data: statusDados, backgroundColor: ['#22c55e', '#3b82f6', '#f59e0b'], borderWidth: 0 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#e5e7eb' } } }
+      }
+    });
+  }
+
+  const contextoEditoras = document.getElementById('graficoLeituraEditoras')?.getContext('2d');
+  if (contextoEditoras) {
+    leituraEditoraChart = new Chart(contextoEditoras, {
+      type: 'bar',
+      data: {
+        labels: editorasOrdenadas.map(([nome]) => nome),
+        datasets: [{ label: 'Obras', data: editorasOrdenadas.map(([, total]) => total), backgroundColor: '#3b82f6', borderRadius: 6 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { color: '#e5e7eb', autoSkip: false, maxRotation: 35, minRotation: 0 }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: '#e5e7eb', precision: 0 }, grid: { color: 'rgba(255,255,255,0.08)' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  const contextoPersonagens = document.getElementById('graficoLeituraPersonagens')?.getContext('2d');
+  if (contextoPersonagens) {
+    leituraPersonagensChart = new Chart(contextoPersonagens, {
+      type: 'bar',
+      data: { labels: personagensOrdenados.map(([nome]) => nome), datasets: [{ label: 'Obras', data: personagensOrdenados.map(([, total]) => total), backgroundColor: '#3b82f6', borderRadius: 6, barThickness: 22 }] },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: { left: 8, right: 12, top: 8, bottom: 8 } },
+        scales: {
+          x: { beginAtZero: true, ticks: { color: '#e5e7eb', precision: 0 }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { ticks: { color: '#e5e7eb', autoSkip: false, callback: (valor) => { const label = personagensOrdenados[valor]?.[0] || ''; return label.length > 22 ? [label.slice(0, 20) + '…'] : label; } }, grid: { display: false } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+}
+
+function carregarQuadrinhosLivros() {
+  if (!usuarioAtual) return;
+  if (quadrinhosUnsubscribe) return;
+  const consulta = query(collection(db, 'quadrinhos'), where('userId', '==', usuarioAtual.uid));
+  quadrinhosUnsubscribe = onSnapshot(consulta, (snapshot) => {
+    quadrinhosLista = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
+      .sort((a, b) => new Date(b.atualizadoEm || b.criadoEm || 0) - new Date(a.atualizadoEm || a.criadoEm || 0));
+    renderizarQuadrinhosLivros(quadrinhosLista);
+    renderizarEstatisticasLeitura(quadrinhosLista);
+  }, (erro) => {
+    console.error('Erro ao acompanhar quadrinhos:', erro);
+    mostrarToast('Não foi possível atualizar as obras.', 'erro');
+  });
+}
+
+function preencherFormularioLeitura(item) {
+  document.getElementById('quadrinho-id').value = item.id || '';
+  document.getElementById('quadrinho-tipo').value = item.tipo || 'quadrinho';
+  document.getElementById('quadrinho-titulo').value = item.titulo || '';
+  document.getElementById('quadrinho-editora').value = item.editora || '';
+  document.getElementById('quadrinho-personagem').value = item.personagem || '';
+  document.getElementById('quadrinho-status').value = item.status || 'fila';
+  document.getElementById('quadrinho-nota').value = item.nota ?? '';
+  document.getElementById('quadrinho-paginas').value = item.paginas ?? '';
+  document.getElementById('quadrinho-inicio').value = item.dataInicio || '';
+  document.getElementById('quadrinho-conclusao').value = item.dataConclusao || '';
+  document.getElementById('quadrinho-capa').value = item.capa?.startsWith('data:') ? '' : item.capa || '';
+  document.getElementById('quadrinho-obs').value = item.observacoes || '';
+  document.getElementById('campos-hq').classList.toggle('escondido', item.tipo === 'livro');
+}
+
+document.getElementById('btn-novo-quadrinho')?.addEventListener('click', () => {
+  document.getElementById('form-quadrinho').reset();
+  document.getElementById('quadrinho-id').value = '';
+  document.getElementById('quadrinho-inicio').value = new Date().toISOString().slice(0, 16);
+  document.getElementById('quadrinho-conclusao').value = '';
+  document.getElementById('campos-hq').classList.remove('escondido');
+  controlarFormularioRecolhivel('form-quadrinho', true);
+  document.getElementById('quadrinho-titulo').focus();
+});
+document.getElementById('quadrinho-tipo')?.addEventListener('change', (event) => document.getElementById('campos-hq').classList.toggle('escondido', event.target.value === 'livro'));
+document.getElementById('quadrinho-status')?.addEventListener('change', (event) => {
+  const conclusao = document.getElementById('quadrinho-conclusao');
+  if (event.target.value === 'lido' && conclusao) conclusao.value = new Date().toISOString().slice(0, 16);
+});
+document.getElementById('btn-cancelar-quadrinho')?.addEventListener('click', () => controlarFormularioRecolhivel('form-quadrinho', false));
+document.getElementById('btn-pagina-quadrinhos-anterior')?.addEventListener('click', () => {
+  quadrinhosPagina = Math.max(1, quadrinhosPagina - 1);
+  renderizarQuadrinhosLivros(quadrinhosLista);
+});
+document.getElementById('btn-pagina-quadrinhos-proxima')?.addEventListener('click', () => {
+  quadrinhosPagina += 1;
+  renderizarQuadrinhosLivros(quadrinhosLista);
+});
+document.getElementById('btn-toggle-estatisticas-leitura')?.addEventListener('click', () => {
+  const painel = document.getElementById('leitura-estatisticas');
+  const aberto = painel.classList.toggle('escondido') === false;
+  document.getElementById('btn-toggle-estatisticas-leitura').textContent = aberto ? 'Ocultar Estatísticas & Gráficos' : 'Ver Estatísticas & Gráficos 📊';
+  if (aberto) renderizarEstatisticasLeitura(quadrinhosLista);
+});
+document.getElementById('form-quadrinho')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const id = document.getElementById('quadrinho-id').value;
+  const tipo = document.getElementById('quadrinho-tipo').value;
+  const titulo = document.getElementById('quadrinho-titulo').value.trim();
+  const dataInicio = document.getElementById('quadrinho-inicio').value || new Date().toISOString().slice(0, 16);
+  let dataConclusao = document.getElementById('quadrinho-conclusao').value;
+  const status = document.getElementById('quadrinho-status').value;
+  if (!titulo) return mostrarToast('Informe o título da obra.', 'erro');
+  let anterior = {};
+  if (id) anterior = (await getDoc(doc(db, 'quadrinhos', id))).data() || {};
+  if (status === 'lido' && !dataConclusao) dataConclusao = new Date().toISOString().slice(0, 16);
+  const capaArquivo = await lerArquivoComoDataUrl(document.getElementById('quadrinho-arquivo'));
+  const tempo = status === 'lido' ? calcularTempoLeitura(dataInicio, dataConclusao) : null;
+  const dados = { tipo, titulo, status, nota: Number(document.getElementById('quadrinho-nota').value) || 0, paginas: Number(document.getElementById('quadrinho-paginas').value) || 0, capa: capaArquivo || document.getElementById('quadrinho-capa').value.trim(), dataInicio, dataConclusao, duracaoSegundos: tempo?.segundosTotais || 0, tempoLeituraTexto: tempo?.texto || '', editora: tipo === 'quadrinho' ? document.getElementById('quadrinho-editora').value.trim() : '', personagem: tipo === 'quadrinho' ? document.getElementById('quadrinho-personagem').value.trim() : '', observacoes: document.getElementById('quadrinho-obs').value.trim(), userId: usuarioAtual.uid, atualizadoEm: new Date().toISOString() };
+  if (id) {
+    await updateDoc(doc(db, 'quadrinhos', id), dados);
+  } else {
+    const novo = await addDoc(collection(db, 'quadrinhos'), { ...dados, criadoEm: new Date().toISOString() });
+  }
+  controlarFormularioRecolhivel('form-quadrinho', false);
+  await carregarQuadrinhosLivros();
+});
+document.getElementById('lista-quadrinhos')?.addEventListener('click', async (event) => {
+  const editar = event.target.closest('[data-leitura-editar]');
+  const excluir = event.target.closest('[data-leitura-excluir]');
+  if (editar) {
+    const item = await getDoc(doc(db, 'quadrinhos', editar.dataset.leituraEditar));
+    if (item.exists()) { preencherFormularioLeitura({ id: item.id, ...item.data() }); controlarFormularioRecolhivel('form-quadrinho', true); }
+  }
+  if (excluir && confirm('Excluir esta obra?')) {
+    await deleteDoc(doc(db, 'quadrinhos', excluir.dataset.leituraExcluir));
+    await carregarQuadrinhosLivros();
+  }
+});
+
 window.deletarAlbum = async function(id) {
   if (confirm("Deseja mesmo apagar este álbum?")) {
     try {
@@ -1833,6 +2242,56 @@ window.deletarAlbum = async function(id) {
     }
   }
 };
+
+function atualizarMetricasAudicao(albuns) {
+  const elementos = {
+    medio: document.getElementById('stat-tempo-medio'),
+    longo: document.getElementById('stat-album-longo'),
+    curto: document.getElementById('stat-album-curto'),
+    correlacao: document.getElementById('stat-correlacao-duracao')
+  };
+  const comDuracao = albuns
+    .map((album) => ({
+      ...album,
+      duracaoSegundos: converterDuracaoParaSegundos(album.duracao, album.duracaoSegundos)
+    }))
+    .filter((album) => album.duracaoSegundos > 0);
+
+  if (!comDuracao.length) {
+    Object.values(elementos).forEach((elemento) => {
+      if (elemento) elemento.textContent = '-';
+    });
+    return;
+  }
+
+  const totalSegundos = comDuracao.reduce((total, album) => total + Number(album.duracaoSegundos), 0);
+  const mediaSegundos = Math.round(totalSegundos / comDuracao.length);
+  const maisLongo = [...comDuracao].sort((a, b) => b.duracaoSegundos - a.duracaoSegundos)[0];
+  const maisCurto = [...comDuracao].sort((a, b) => a.duracaoSegundos - b.duracaoSegundos)[0];
+
+  if (elementos.medio) elementos.medio.textContent = formatarDuracao(mediaSegundos);
+  if (elementos.longo) elementos.longo.textContent = `${maisLongo.nome} (${formatarDuracao(maisLongo.duracaoSegundos)})`;
+  if (elementos.curto) elementos.curto.textContent = `${maisCurto.nome} (${formatarDuracao(maisCurto.duracaoSegundos)})`;
+
+  if (comDuracao.length < 2) {
+    if (elementos.correlacao) elementos.correlacao.textContent = 'Dados insuficientes';
+    return;
+  }
+
+  const duracoes = comDuracao.map((album) => Number(album.duracaoSegundos));
+  const notas = comDuracao.map((album) => Number(album.media || 0));
+  const mediaDuracao = duracoes.reduce((total, valor) => total + valor, 0) / duracoes.length;
+  const mediaNota = notas.reduce((total, valor) => total + valor, 0) / notas.length;
+  const numerador = duracoes.reduce((total, duracao, index) => total + (duracao - mediaDuracao) * (notas[index] - mediaNota), 0);
+  const denominador = Math.sqrt(
+    duracoes.reduce((total, duracao) => total + (duracao - mediaDuracao) ** 2, 0) *
+    notas.reduce((total, nota) => total + (nota - mediaNota) ** 2, 0)
+  );
+  const correlacao = denominador ? numerador / denominador : 0;
+  const leitura = correlacao >= 0.2 ? 'notas maiores' : correlacao <= -0.2 ? 'notas menores' : 'relação fraca';
+
+  if (elementos.correlacao) elementos.correlacao.textContent = `${leitura} (r = ${correlacao.toFixed(2)})`;
+}
 
 // ESTATÍSTICAS
 async function carregarEstatisticas() {
@@ -1858,8 +2317,11 @@ async function carregarEstatisticas() {
     document.getElementById('stat-album-extenso').innerText = '-';
     document.getElementById('stat-album-enxuto').innerText = '-';
     document.getElementById('stat-total-faixas').innerText = '0';
+    atualizarMetricasAudicao([]);
     return;
   }
+
+  atualizarMetricasAudicao(albuns);
 
   const albunsPorNota = [...albuns].sort((a, b) => b.media - a.media);
   document.getElementById('stat-melhor').innerText = `${albunsPorNota[0].nome} (${albunsPorNota[0].media})`;
@@ -2188,16 +2650,6 @@ async function carregarEstatisticas() {
   const ctx = document.getElementById('graficoCorrelacao')?.getContext('2d');
   if (window.meuGrafico) window.meuGrafico.destroy();
 
-  const canvasCorrelacao = document.getElementById('graficoCorrelacao');
-  const wrapperCorrelacao = canvasCorrelacao?.closest('.canvas-wrapper');
-
-  if (canvasCorrelacao && wrapperCorrelacao) {
-    const larguraMinima = Math.max(wrapperCorrelacao.clientWidth, Math.max(420, albunsPorAno.length * 50));
-    canvasCorrelacao.style.width = `${larguraMinima}px`;
-    canvasCorrelacao.style.minWidth = `${larguraMinima}px`;
-    canvasCorrelacao.style.height = '350px';
-  }
-
   if (!ctx) return;
 
   window.meuGrafico = new Chart(ctx, {
@@ -2220,7 +2672,7 @@ async function carregarEstatisticas() {
       }]
     },
     options: {
-      responsive: false,
+      responsive: true,
       maintainAspectRatio: false,
       animation: { duration: 600 },
       interaction: { mode: 'nearest', intersect: false },
