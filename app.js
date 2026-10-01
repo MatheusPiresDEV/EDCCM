@@ -1227,7 +1227,10 @@ function subscribeViagens() {
 
   viagensUnsubscribe = onSnapshot(q, (snapshot) => {
     const lista = [];
-    snapshot.forEach((item) => lista.push({ id: item.id, ...item.data() }));
+    snapshot.forEach((item) => {
+      const dados = item.data();
+      if (dados.categoria === 'viagem') lista.push({ id: item.id, ...dados });
+    });
     lista.sort((a, b) => {
       const aa = a.atualizadoEm && a.atualizadoEm.toDate ? a.atualizadoEm.toDate() : new Date(a.atualizadoEm || 0);
       const bb = b.atualizadoEm && b.atualizadoEm.toDate ? b.atualizadoEm.toDate() : new Date(b.atualizadoEm || 0);
@@ -1259,7 +1262,7 @@ function subscribeViagens() {
             ${tarefas.map((tarefa, index) => `
               <label class="viagem-status-row">
                 <input type="checkbox" data-tarefa-toggle="${viagem.id}" data-tarefa-index="${index}" ${tarefa.concluida ? 'checked' : ''}>
-                <span>${escaparTextoLog(tarefa.texto || `Tarefa ${index + 1}`)}</span>
+                <span>${escaparHtml(tarefa.texto || `Tarefa ${index + 1}`)}</span>
               </label>
             `).join('')}
           </div>
@@ -1279,6 +1282,12 @@ function subscribeViagens() {
         </div>
       `;
     }).join('');
+  }, (erro) => {
+    console.error('Erro ao carregar To Do Lists:', erro);
+    const container = document.getElementById('lista-viagens');
+    if (container) {
+      container.innerHTML = '<p class="empty-state">Não foi possível carregar as tarefas. Tente atualizar a página.</p>';
+    }
   });
 }
 
