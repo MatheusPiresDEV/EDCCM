@@ -106,6 +106,9 @@
             <button class="nav-btn" data-target="sec-top5">
                 <span class="nav-text">Top 5</span>
             </button>
+            <button class="nav-btn" data-target="sec-reaudicoes">
+                <span class="nav-text">Reouvir &amp; Comparações</span>
+            </button>
             <button class="nav-btn" data-target="sec-viagens">
                 <span class="nav-text">To Do Lists</span>
             </button>
@@ -137,7 +140,11 @@
         <section id="sec-dashboard" class="tela escondido">
             <div class="secao-cabecalho">
                 <h2>Meus Álbuns</h2>
-                <span id="boas-vindas-user" class="badge-saudacao">Bem-vindo!</span>
+                <div class="dashboard-resumo">
+                    <span id="dashboard-total-registros" class="badge-saudacao">0 registros</span>
+                    <span id="dashboard-tempo-total" class="dashboard-tempo">00:00:00</span>
+                    <span id="boas-vindas-user" class="badge-saudacao">Bem-vindo!</span>
+                </div>
             </div>
 
             <div class="painel-filtros">
@@ -260,7 +267,7 @@
                         <button type="submit" id="btn-salvar" class="btn-sucesso">
                             Salvar Álbum
                         </button>
-                        <button type="button" onclick="navegarPara('sec-dashboard')" class="btn-secundario">
+                        <button type="button" id="btn-cancelar-album" class="btn-secundario">
                             Cancelar
                         </button>
                     </div>
@@ -354,6 +361,51 @@
             </form>
 
             <div id="lista-viagens" class="cards-grid"></div>
+        </section>
+
+        <section id="sec-reaudicoes" class="tela escondido">
+            <div class="secao-cabecalho reaudicoes-cabecalho">
+                <div>
+                    <h2>Reouvir &amp; Comparações</h2>
+                    <p class="secao-subtitulo">Acompanhe como suas audições e notas mudam com o tempo.</p>
+                </div>
+                <div class="reaudicoes-acoes">
+                    <button type="button" id="btn-comparar-reaudicoes" class="btn-secundario btn-sm">Comparar Audições</button>
+                    <button type="button" id="btn-nova-reaudicao" class="btn-primario btn-sm">Registrar Ré-audição</button>
+                </div>
+            </div>
+
+            <div class="reaudicoes-metricas">
+                <article class="reaudicao-metrica"><span>Total reouvidos</span><strong id="reaudicao-total">0</strong></article>
+                <article class="reaudicao-metrica"><span>Média: ré-audição / original</span><strong id="reaudicao-medias">0,0 / 0,0</strong></article>
+                <article class="reaudicao-metrica"><span>Maior ganho</span><strong id="reaudicao-maior-ganho">Ainda sem comparação</strong></article>
+                <article class="reaudicao-metrica"><span>Maior queda</span><strong id="reaudicao-maior-queda">Ainda sem comparação</strong></article>
+            </div>
+
+            <section class="reaudicao-grafico-secao">
+                <div class="reaudicao-grafico-cabecalho">
+                    <div>
+                        <h3>Evolução por banda</h3>
+                        <p class="secao-subtitulo">Notas das audições em ordem cronológica</p>
+                    </div>
+                    <select id="reaudicao-filtro-banda" aria-label="Filtrar gráfico por banda">
+                        <option value="">Selecione uma banda</option>
+                    </select>
+                </div>
+                <div class="reaudicao-grafico-wrap"><canvas id="grafico-evolucao-reaudicoes"></canvas></div>
+            </section>
+
+            <section class="reaudicao-grafico-secao">
+                <div class="reaudicao-grafico-cabecalho">
+                    <div>
+                        <h3>Caderno antigo x nota atual</h3>
+                        <p class="secao-subtitulo">Notas antigas e atuais por álbum reouvido</p>
+                    </div>
+                </div>
+                <div class="reaudicao-grafico-wrap"><canvas id="grafico-barras-reaudicoes"></canvas></div>
+            </section>
+
+            <div id="lista-reaudicoes" class="reaudicoes-pares" aria-live="polite"></div>
         </section>
 
         <section id="sec-observacoes" class="tela escondido">
@@ -495,6 +547,15 @@
         <section id="sec-estatisticas" class="tela escondido">
             <div class="secao-cabecalho">
                 <h2>Painel de Estatísticas</h2>
+                <div class="stats-controles">
+                    <label class="stats-filtro-label" for="filtro-tipo-estatistica">Exibir</label>
+                    <select id="filtro-tipo-estatistica" class="stats-filtro-select">
+                        <option value="geral">Geral (Tudo)</option>
+                        <option value="ineditos">Apenas Inéditos</option>
+                        <option value="caderno">Apenas Caderno Antigo</option>
+                        <option value="reaudicoes">Apenas Ré-audições</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Busca Rápida de Álbuns -->
@@ -650,6 +711,18 @@
             </div>
 
             <div class="grid-graficos">
+                <div class="container-grafico atividade-grafico">
+                    <div class="atividade-grafico-cabecalho">
+                        <h3>Atividade de Escutas</h3>
+                        <select id="filtro-periodo-atividade" aria-label="Agrupar atividade por período">
+                            <option value="mes">Mês</option>
+                            <option value="trimestre">Trimestre</option>
+                            <option value="ano">Ano</option>
+                            <option value="semana">Dia da Semana</option>
+                        </select>
+                    </div>
+                    <div class="canvas-wrapper"><canvas id="graficoAtividadeEscutas"></canvas></div>
+                </div>
                 <div class="container-grafico">
                     <h3><span>📊</span> Comparativo de Bandas por Nota Média</h3>
                     <div class="canvas-wrapper">
@@ -763,6 +836,81 @@
         </section>
 
     </main>
+
+    <div id="modal-novo-album-inteligente" class="modal-overlay escondido" role="dialog" aria-modal="true" aria-labelledby="modal-novo-album-titulo">
+        <div class="modal-conteudo modal-reaudicao-conteudo">
+            <div class="modal-cabecalho">
+                <h3 id="modal-novo-album-titulo">Nova escuta</h3>
+                <button type="button" class="btn-fechar" data-fechar-modal="modal-novo-album-inteligente" aria-label="Fechar">×</button>
+            </div>
+            <form id="form-novo-album-inteligente" class="reaudicao-form">
+                <fieldset class="modo-escuta-opcoes">
+                    <legend>Tipo de registro</legend>
+                    <label><input type="radio" name="modo-escuta" value="inedita" checked> Escuta Inédita</label>
+                    <label><input type="radio" name="modo-escuta" value="reaudicao"> Ré-audição</label>
+                </fieldset>
+                <div id="grupo-selecao-reaudicao" class="grupo-campo escondido">
+                    <label for="novo-album-fonte">Álbum cadastrado ou do Caderno Antigo</label>
+                    <select id="novo-album-fonte">
+                        <option value="">Selecione um álbum</option>
+                    </select>
+                    <p id="novo-album-fonte-resumo" class="secao-subtitulo" aria-live="polite"></p>
+                </div>
+                <div class="form-acoes">
+                    <button type="submit" class="btn-sucesso">Continuar</button>
+                    <button type="button" class="btn-secundario" data-fechar-modal="modal-novo-album-inteligente">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-reaudicao" class="modal-overlay escondido" role="dialog" aria-modal="true" aria-labelledby="modal-reaudicao-titulo">
+        <div class="modal-conteudo modal-reaudicao-conteudo">
+            <div class="modal-cabecalho">
+                <h3 id="modal-reaudicao-titulo">Registrar ré-audição</h3>
+                <button type="button" class="btn-fechar" data-fechar-modal="modal-reaudicao" aria-label="Fechar">×</button>
+            </div>
+            <form id="form-reaudicao" class="reaudicao-form">
+                <div class="grupo-campo">
+                    <label for="reaudicao-album-existente">Seleção rápida</label>
+                    <select id="reaudicao-album-existente">
+                        <option value="">Cadastrar manualmente</option>
+                    </select>
+                </div>
+                <button type="button" id="btn-mostrar-caderno-antigo" class="btn-secundario btn-sm">Adicionar ao Caderno Antigo</button>
+                <div class="form-acoes">
+                    <button type="submit" class="btn-sucesso">Abrir avaliação completa</button>
+                    <button type="button" class="btn-secundario" data-fechar-modal="modal-reaudicao">Cancelar</button>
+                </div>
+            </form>
+            <form id="form-caderno-antigo" class="reaudicao-form escondido">
+                <input type="hidden" id="caderno-id">
+                <div class="grupo-campo"><label for="caderno-banda">Nome da Banda *</label><input type="text" id="caderno-banda" required></div>
+                <div class="grupo-campo"><label for="caderno-album">Nome do Álbum *</label><input type="text" id="caderno-album" required></div>
+                <div class="grid-form-2col">
+                    <div class="grupo-campo"><label for="caderno-nota">Nota Antiga (0 a 10) *</label><input type="number" id="caderno-nota" min="0" max="10" step="0.1" required></div>
+                    <div class="grupo-campo"><label for="caderno-ano">Ano (opcional)</label><input type="number" id="caderno-ano" min="1900" max="2099"></div>
+                </div>
+                <div class="grupo-campo"><label for="caderno-data-escuta">Data da Escuta (opcional)</label><input type="date" id="caderno-data-escuta"></div>
+                <div class="grupo-campo"><label for="caderno-capa">Capa (opcional)</label><input type="url" id="caderno-capa" placeholder="https://..."><input type="file" id="caderno-capa-arquivo" accept="image/*"></div>
+                <div class="form-acoes"><button type="submit" class="btn-sucesso">Salvar no Caderno</button><button type="button" id="btn-voltar-selecao-caderno" class="btn-secundario">Voltar</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-comparar-reaudicoes" class="modal-overlay escondido" role="dialog" aria-modal="true" aria-labelledby="modal-comparar-titulo">
+        <div class="modal-conteudo modal-comparar-conteudo">
+            <div class="modal-cabecalho">
+                <h3 id="modal-comparar-titulo">Comparar audições</h3>
+                <button type="button" class="btn-fechar" data-fechar-modal="modal-comparar-reaudicoes" aria-label="Fechar">×</button>
+            </div>
+            <div class="comparador-controles">
+                <div class="grupo-campo"><label for="comparar-reaudicao-a">Primeira audição</label><select id="comparar-reaudicao-a"></select></div>
+                <div class="grupo-campo"><label for="comparar-reaudicao-b">Segunda audição</label><select id="comparar-reaudicao-b"></select></div>
+            </div>
+            <div id="comparador-resultado" class="comparador-resultado"></div>
+        </div>
+    </div>
 
     <!-- MODAL 1: OBSERVAÇÕES -->
     <div id="modal-obs" class="modal-overlay escondido" onclick="fecharModalObs(false, event)">

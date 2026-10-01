@@ -19,6 +19,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+if (typeof Chart !== 'undefined') Chart.defaults.devicePixelRatio = window.devicePixelRatio || 1;
 
 // LISTA DE FRASES PARA A LOCKSCREEN
 const FRASES = [
@@ -462,8 +463,23 @@ let top5ListaCompleta = [];
 let top5Unsubscribe = null;
 let viagensUnsubscribe = null;
 let observacoesUnsubscribe = null;
+let reaudicoesUnsubscribe = null;
+let reaudicoesLista = [];
+let reaudicoesLegadas = [];
+let reaudicaoAlbunsBase = [];
+let reaudicaoCatalogo = [];
+let reaudicaoModoAtivo = false;
+let reaudicaoAlbumOriginal = null;
+let reaudicaoEditandoId = null;
+let reaudicaoEvolucaoChart = null;
+let reaudicaoComparacaoChart = null;
+let graficoAtividadeEscutas = null;
+let registrosEstatisticas = [];
 let timerAudicaoSegundos = 0;
 let timerAudicaoIntervalo = null;
+let timerAudicaoId = null;
+let timerAudicaoBaseSegundos = 0;
+let timerAudicaoIniciadoEm = null;
 const ITENS_POR_PAGINA = 12;
 const ADMIN_EMAILS = ['matheusgustavodasilvapires@gmail.com'];
 const PERFIL_USERS_COLLECTION = 'usuarios';
@@ -490,6 +506,31 @@ function ajustarAlturaCanvas(canvas, totalItens, minHeight = 300, alturaPorItem 
 
 function normalizarEmail(email = '') {
   return (email || '').trim().toLowerCase();
+}
+
+function normalizarTexto(texto = '') {
+  return String(texto)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function criarChaveAlbum(banda, album) {
+  return `${normalizarTexto(banda)}_${normalizarTexto(album)}`;
+}
+
+function calcularCorPorNota(nota, menorNota = 0, maiorNota = 10) {
+  const valor = Number.parseFloat(nota);
+  if (!Number.isFinite(valor)) return '#7f8c8d';
+  const inicio = { r: 0xe7, g: 0x4c, b: 0x3c };
+  const fim = { r: 0xff, g: 0xd7, b: 0x00 };
+  const intervalo = Number(maiorNota) - Number(menorNota);
+  const fator = intervalo > 0 ? Math.max(0, Math.min(1, (valor - Number(menorNota)) / intervalo)) : 1;
+  const canal = (chave) => Math.round(inicio[chave] + (fim[chave] - inicio[chave]) * fator).toString(16).padStart(2, '0');
+  return `#${canal('r')}${canal('g')}${canal('b')}`;
 }
 
 function usuarioEhAdmin(user = null, perfil = null) {
@@ -854,7 +895,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const target = button.getAttribute('data-target');
         if (target) {
           fecharMenuMobile();
-          window.navegarPara(target);
+          if (target === 'sec-novo-album') abrirModalNovoAlbumInteligente();
+          else window.navegarPara(target);
         }
       });
     });
@@ -879,6 +921,7 @@ window.navegarPara = function(idTela) {
     'sec-dashboard': 'sec-dashboard',
     'sec-novo-album': 'sec-novo-album',
     'sec-top5': 'sec-top5',
+    'sec-reaudicoes': 'sec-reaudicoes',
     'sec-viagens': 'sec-viagens',
     'sec-observacoes': 'sec-observacoes',
     'sec-bandas': 'sec-bandas',
@@ -901,16 +944,21 @@ window.navegarPara = function(idTela) {
   if (idTela === 'sec-quadrinhos') carregarQuadrinhosLivros();
   if (idTela === 'sec-estatisticas') carregarEstatisticas();
   if (idTela === 'sec-admin') renderAdminDashboard();
+  if (idTela === 'sec-reaudicoes') renderizarGraficoReaudicoes();
 };
 
 window.prepararNovoAlbum = function() {
+  reaudicaoModoAtivo = false;
+  reaudicaoAlbumOriginal = null;
+  reaudicaoEditandoId = null;
   document.getElementById('form-album').reset();
   document.getElementById('album-id').value = '';
   document.getElementById('container-faixas').innerHTML = '';
   document.getElementById('preview-container').classList.add('escondido');
-  document.getElementById('form-titulo').innerText = 'Novo Álbum';
+  document.getElementById('form-titulo').innerText = 'Cadastrar Novo Álbum';
+  document.getElementById('btn-salvar').innerText = 'Salvar Álbum';
   imagemBase64Temp = "";
-  resetarTimerAudicao();
+  selecionarTimerAudicao(obterIdRascunhoTimer(), 0);
   addLinhaFaixa();
   navegarPara('sec-novo-album');
 };
@@ -978,7 +1026,12 @@ onAuthStateChanged(auth, async (user) => {
   if (viagensUnsubscribe) viagensUnsubscribe();
   if (observacoesUnsubscribe) observacoesUnsubscribe();
   if (quadrinhosUnsubscribe) quadrinhosUnsubscribe();
+  if (reaudicoesUnsubscribe) reaudicoesUnsubscribe();
   quadrinhosUnsubscribe = null;
+  reaudicoesUnsubscribe = null;
+  reaudicoesLista = [];
+  reaudicoesLegadas = [];
+  reaudicaoCatalogo = [];
 
   if (user) {
     usuarioAtual = user;
@@ -994,6 +1047,7 @@ onAuthStateChanged(auth, async (user) => {
     subscribeTop5();
     subscribeViagens();
     subscribeObservacoes();
+    subscribeReaudicoes();
     navegarPara('sec-dashboard');
   } else {
     usuarioAtual = null;
@@ -1406,6 +1460,898 @@ document.getElementById('lista-viagens').addEventListener('change', async (event
   mostrarToast(checkbox.checked ? 'Tarefa concluída!' : 'Tarefa reaberta.');
 });
 
+// REAUDICOES E COMPARACOES
+function converterDataReaudicao(valor) {
+  if (!valor) return null;
+  const data = typeof valor.toDate === 'function' ? valor.toDate() : new Date(valor);
+  return Number.isNaN(data.getTime()) ? null : data;
+}
+
+function formatarDataReaudicao(valor) {
+  const data = converterDataReaudicao(valor);
+  return data ? new Intl.DateTimeFormat('pt-BR').format(data) : 'Data indisponível';
+}
+
+function calcularIntervaloAudicoes(inicioValor, fimValor) {
+  let inicio = converterDataReaudicao(inicioValor);
+  let fim = converterDataReaudicao(fimValor);
+  if (!inicio || !fim) return 'Intervalo indisponível';
+  if (fim < inicio) [inicio, fim] = [fim, inicio];
+
+  const adicionarMeses = (data, quantidade) => {
+    const resultado = new Date(data);
+    const diaOriginal = resultado.getDate();
+    resultado.setDate(1);
+    resultado.setMonth(resultado.getMonth() + quantidade);
+    const ultimoDia = new Date(resultado.getFullYear(), resultado.getMonth() + 1, 0).getDate();
+    resultado.setDate(Math.min(diaOriginal, ultimoDia));
+    return resultado;
+  };
+  let anos = Math.max(0, fim.getFullYear() - inicio.getFullYear());
+  if (adicionarMeses(inicio, anos * 12) > fim) anos -= 1;
+  let cursor = adicionarMeses(inicio, anos * 12);
+  let meses = Math.max(0, (fim.getFullYear() - cursor.getFullYear()) * 12 + fim.getMonth() - cursor.getMonth());
+  if (adicionarMeses(cursor, meses) > fim) meses -= 1;
+  cursor = adicionarMeses(cursor, meses);
+  const dias = Math.floor((fim - cursor) / 86400000);
+  const partes = [];
+  if (anos) partes.push(`${anos} ${anos === 1 ? 'ano' : 'anos'}`);
+  if (meses) partes.push(`${meses} ${meses === 1 ? 'mês' : 'meses'}`);
+  if (dias || !partes.length) partes.push(`${dias} ${dias === 1 ? 'dia' : 'dias'}`);
+  return partes.join(' e ');
+}
+
+function obterAlbumBasePorId(id) {
+  return reaudicaoAlbunsBase.find((album) => album.id === id) || null;
+}
+
+function obterRefReaudicao(item) {
+  return doc(db, item.colecaoDados || 'historico_reaudicoes', item.firestoreId || item.id);
+}
+
+function normalizarDocumentoReaudicao(id, dados, colecaoDados = 'historico_reaudicoes') {
+  const notaAntigaValor = dados.notaAntiga ?? dados.notaOriginal ?? dados.notaCaderno ?? dados.mediaAntiga;
+  const notaAtualValor = dados.notaAtual ?? dados.media ?? dados.nota;
+  const albumNome = dados.nomeAlbum || dados.nomeCaderno || dados.album || dados.nome || dados.titulo || 'Álbum sem nome';
+  const bandaNome = dados.nomeBanda || dados.bandaCaderno || dados.banda || dados.artista || 'Artista não informado';
+  return {
+    id: colecaoDados === 'historico_reaudicoes' ? id : `legacy-${id}`,
+    firestoreId: id,
+    colecaoDados,
+    ...dados,
+    album: albumNome,
+    nomeAlbum: albumNome,
+    banda: bandaNome,
+    nomeBanda: bandaNome,
+    notaAntiga: notaAntigaValor === null || notaAntigaValor === undefined || notaAntigaValor === '' ? null : Number.parseFloat(notaAntigaValor),
+    notaOriginal: notaAntigaValor === null || notaAntigaValor === undefined || notaAntigaValor === '' ? null : Number.parseFloat(notaAntigaValor),
+    nota: notaAtualValor === null || notaAtualValor === undefined || notaAtualValor === '' ? null : Number.parseFloat(notaAtualValor),
+    notaAtual: notaAtualValor === null || notaAtualValor === undefined || notaAtualValor === '' ? null : Number.parseFloat(notaAtualValor),
+    capa: dados.imagem || dados.capa || '',
+    observacoes: dados.obs || dados.observacoes || '',
+    dataReouvido: dados.dataReouvido || dados.criadoEm
+  };
+}
+
+function obterFonteReaudicao(valor) {
+  const [origem, id] = String(valor || '').split(':');
+  if (!id) return null;
+  return reaudicaoCatalogo.find((item) => item.tipoCatalogo === origem && item.id === id) || null;
+}
+
+function temNotaOriginal(item) {
+  const valor = item.notaAntiga ?? item.notaOriginal ?? item.notaCaderno ?? item.mediaAntiga;
+  return valor !== null && valor !== undefined && valor !== '' && Number.isFinite(Number.parseFloat(valor));
+}
+
+function registroVeioDoCaderno(registro) {
+  return registro.origem === 'caderno_antigo' || registro.tipoOrigem === 'caderno_antigo' ||
+    registro.categoria === 'caderno_antigo' || registro.tipo === 'caderno_antigo' ||
+    registro.registroRapido === true || registro.isCaderno === true ||
+    (temNotaOriginal(registro) && Boolean(registro.dataOriginal || registro.dataEscuta) && !registro.albumIdOriginal);
+}
+
+function criarCardCaderno(registro, id) {
+  const nome = registro.nomeCaderno || registro.nomeAlbum || registro.album || registro.nome || 'Álbum sem nome';
+  const banda = registro.bandaCaderno || registro.nomeBanda || registro.banda || 'Artista não informado';
+  const notaAntiga = Number.parseFloat(registro.notaAntiga ?? registro.notaOriginal ?? registro.notaCaderno ?? registro.mediaAntiga ?? registro.media ?? registro.nota ?? 0);
+  const notaAtualValor = registro.notaAtual ?? registro.mediaAtual ?? registro.mediaReaudicao ?? registro.notaReaudicao ?? (registro.integradoAlbumPrincipal ? registro.media ?? registro.nota : null);
+  const notaAtual = notaAtualValor === null || notaAtualValor === undefined || notaAtualValor === '' ? null : Number.parseFloat(notaAtualValor);
+  const imagem = registro.imagemCaderno || registro.capaCaderno || registro.imagem || registro.capa || '';
+  const dataOriginal = converterDataReaudicao(registro.dataOriginal || registro.dataEscuta || registro.dataReouvido || registro.criadoEm);
+  const dataAtual = converterDataReaudicao(registro.dataReouvido || registro.atualizadoEm);
+  const base = {
+    ...registro,
+    id: `caderno-${id}`,
+    historicoId: id,
+    comparisonId: registro.id || id,
+    firestoreId: registro.firestoreId || id,
+    colecaoDados: registro.colecaoDados || 'historico_reaudicoes',
+    origem: 'caderno_antigo',
+    nome,
+    banda,
+    imagem,
+    ano: registro.anoCaderno || registro.ano || null,
+    notaAntiga,
+    notaOriginal: notaAntiga,
+    notaAtual,
+    dataOriginal,
+    dataReouvido: dataAtual,
+    isCaderno: true,
+    cadernoPareado: Number.isFinite(notaAtual),
+    media: notaAntiga,
+    nmp: Number((notaAntiga * 10).toFixed(1)),
+    duracao: '',
+    duracaoSegundos: 0,
+    criadoEm: dataOriginal,
+    atualizadoEm: dataOriginal
+  };
+  const cards = [base];
+  if (Number.isFinite(notaAtual)) {
+    cards.push({
+      ...base,
+      id: `reaudicao-${id}`,
+      isCaderno: false,
+      isReaudicao: true,
+      media: notaAtual,
+      nmp: Number((notaAtual * 10).toFixed(1)),
+      somaNotas: registro.somaNotas,
+      faixas: registro.faixas || [],
+      duracao: registro.duracao || '',
+      duracaoSegundos: Number(registro.duracaoSegundos || 0),
+      criadoEm: dataAtual || dataOriginal,
+      atualizadoEm: converterDataReaudicao(registro.atualizadoEm || dataAtual)
+    });
+  }
+  return cards;
+}
+
+function preencherSelectAlbunsReaudicao() {
+  const select = document.getElementById('reaudicao-album-existente');
+  if (!select) return;
+  const atual = select.value;
+  select.innerHTML = '<option value="">Cadastrar manualmente</option>' + reaudicaoAlbunsBase
+    .map((album) => `<option value="album:${escaparHtml(album.id)}">${escaparHtml(album.banda || 'Artista não informado')} — ${escaparHtml(album.nome || 'Álbum sem nome')}</option>`)
+    .concat(reaudicaoCatalogo.filter((item) => item.tipoCatalogo === 'caderno')
+      .map((item) => `<option value="caderno:${escaparHtml(item.id)}">Caderno antigo · ${escaparHtml(item.bandaCaderno || item.banda || 'Artista não informado')} — ${escaparHtml(item.nomeCaderno || item.nome || 'Álbum sem nome')} (${Number(item.notaAntiga || 0).toFixed(1)})</option>`))
+    .join('');
+  if ([...select.options].some((option) => option.value === atual)) select.value = atual;
+}
+
+async function carregarAlbunsParaReaudicao() {
+  if (!usuarioAtual) return;
+  const [albunsSnapshot, cadernoSnapshot] = await Promise.all([
+    getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid))),
+    getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)))
+  ]);
+  try {
+    const legadoSnapshot = await getDocs(query(collection(db, 'reaudicoes'), where('userId', '==', usuarioAtual.uid)));
+    reaudicoesLegadas = legadoSnapshot.docs.map((item) => normalizarDocumentoReaudicao(item.id, item.data(), 'reaudicoes'));
+  } catch (erro) {
+    console.info('Coleção legada de ré-audições indisponível.');
+  }
+  reaudicaoAlbunsBase = albunsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  reaudicaoCatalogo = [
+    ...reaudicaoAlbunsBase.map((album) => ({ ...album, tipoCatalogo: 'album' })),
+    ...cadernoSnapshot.docs.map((item) => ({ id: item.id, ...item.data(), tipoCatalogo: 'caderno' }))
+      .filter((item) => registroVeioDoCaderno(item)),
+    ...reaudicoesLegadas.filter((item) => registroVeioDoCaderno(item)).map((item) => ({ ...item, tipoCatalogo: 'caderno' }))
+  ];
+  preencherSelectAlbunsReaudicao();
+  renderizarGraficoReaudicoes();
+}
+
+async function buscarAlbumDuplicado(banda, album, ignorar = null, tipoCadastro = 'album') {
+  const chave = criarChaveAlbum(banda, album);
+  if (!normalizarTexto(banda) || !normalizarTexto(album)) return null;
+  const snapshots = await Promise.all([
+    getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid))),
+    getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)))
+  ]);
+  const documentos = snapshots.flatMap((snapshot, indice) => snapshot.docs.map((item) => ({
+    id: item.id,
+    colecao: indice === 0 ? 'albuns' : 'historico_reaudicoes',
+    data: item.data()
+  })));
+  try {
+    const legado = await getDocs(query(collection(db, 'reaudicoes'), where('userId', '==', usuarioAtual.uid)));
+    documentos.push(...legado.docs.map((item) => ({ id: item.id, colecao: 'reaudicoes', data: item.data() })));
+  } catch (erro) {
+    console.info('Consulta da coleção legada ignorada durante validação de duplicidade.');
+  }
+
+  return documentos.find((item) => {
+    if (ignorar && item.colecao === (ignorar.colecaoDados || 'historico_reaudicoes') && item.id === (ignorar.firestoreId || ignorar.id)) return false;
+    const dados = item.data;
+    if (item.colecao !== 'albuns' && tipoCadastro === 'caderno' && dados.integradoAlbumPrincipal && !registroVeioDoCaderno(dados)) return false;
+    const chaveExistente = criarChaveAlbum(
+      dados.bandaCaderno || dados.nomeBanda || dados.banda || dados.artista,
+      dados.nomeCaderno || dados.nomeAlbum || dados.album || dados.nome || dados.titulo
+    );
+    return chaveExistente === chave;
+  }) || null;
+}
+
+async function abrirModalNovoAlbumInteligente() {
+  try {
+    await carregarAlbunsParaReaudicao();
+  } catch (erro) {
+    console.error('Erro ao carregar catálogo de álbuns:', erro);
+    mostrarToast('Não foi possível carregar o catálogo de álbuns.', 'erro');
+    return;
+  }
+  const select = document.getElementById('novo-album-fonte');
+  select.innerHTML = '<option value="">Selecione um álbum</option>' + reaudicaoCatalogo.map((item) => {
+    const titulo = item.nomeCaderno || item.nome || 'Álbum sem nome';
+    const banda = item.bandaCaderno || item.banda || 'Artista não informado';
+    const origem = item.tipoCatalogo === 'caderno' ? `Caderno · ${Number(item.notaAntiga || 0).toFixed(1)}` : 'Álbuns';
+    return `<option value="${escaparHtml(item.tipoCatalogo)}:${escaparHtml(item.id)}">${escaparHtml(banda)} — ${escaparHtml(titulo)} (${origem})</option>`;
+  }).join('');
+  document.querySelector('input[name="modo-escuta"][value="inedita"]').checked = true;
+  document.getElementById('grupo-selecao-reaudicao').classList.add('escondido');
+  select.required = false;
+  document.getElementById('novo-album-fonte-resumo').textContent = '';
+  document.getElementById('modal-novo-album-inteligente').classList.remove('escondido');
+}
+
+function iniciarAvaliacaoCompleta(fonteSelecionada) {
+  const albumOriginal = fonteSelecionada?.tipoCatalogo === 'album'
+    ? fonteSelecionada
+    : fonteSelecionada ? {
+      ...fonteSelecionada,
+      nome: fonteSelecionada.nomeCaderno || fonteSelecionada.nome,
+      banda: fonteSelecionada.bandaCaderno || fonteSelecionada.banda,
+      imagem: fonteSelecionada.imagemCaderno || fonteSelecionada.imagem,
+      ano: fonteSelecionada.anoCaderno || fonteSelecionada.ano,
+      media: Number(fonteSelecionada.notaAntiga ?? fonteSelecionada.notaOriginal ?? fonteSelecionada.media ?? 0),
+      criadoEm: fonteSelecionada.dataOriginal || fonteSelecionada.dataReouvido || fonteSelecionada.criadoEm
+    } : null;
+  prepararNovoAlbum();
+  reaudicaoModoAtivo = true;
+  reaudicaoAlbumOriginal = albumOriginal;
+  if (fonteSelecionada?.tipoCatalogo === 'album') {
+    selecionarTimerAudicao(`album:${fonteSelecionada.id}`, 0);
+  } else if (fonteSelecionada?.tipoCatalogo === 'caderno') {
+    selecionarTimerAudicao(`album:caderno:${fonteSelecionada.colecaoDados || 'historico_reaudicoes'}:${fonteSelecionada.firestoreId || fonteSelecionada.id}`, 0);
+  } else {
+    selecionarTimerAudicao(obterIdRascunhoTimer(), 0);
+  }
+  if (albumOriginal) {
+    document.getElementById('album-nome').value = albumOriginal.nome || '';
+    document.getElementById('album-banda').value = albumOriginal.banda || '';
+    document.getElementById('album-ano').value = albumOriginal.ano || '';
+    document.getElementById('album-favorita').value = albumOriginal.favorita || '';
+    if (String(albumOriginal.imagem || '').startsWith('data:image/')) {
+      imagemBase64Temp = albumOriginal.imagem;
+      document.getElementById('album-imagem').value = '';
+    } else {
+      document.getElementById('album-imagem').value = albumOriginal.imagem || '';
+    }
+    document.getElementById('album-obs').value = '';
+    document.getElementById('preview-container').classList.toggle('escondido', !albumOriginal.imagem);
+    document.getElementById('img-preview').src = albumOriginal.imagem || '';
+    containerFaixas.innerHTML = '';
+    if (Array.isArray(albumOriginal.faixas) && albumOriginal.faixas.length) {
+      albumOriginal.faixas.forEach((faixa) => addLinhaFaixa(faixa.nome || '', 'Boa'));
+    } else addLinhaFaixa();
+  }
+  document.getElementById('form-titulo').textContent = albumOriginal
+    ? `Ré-audição: ${albumOriginal.nome || 'Álbum'}`
+    : 'Nova audição (cadastro manual)';
+  document.getElementById('btn-salvar').textContent = 'Salvar no Histórico';
+  navegarPara('sec-novo-album');
+}
+
+document.querySelectorAll('input[name="modo-escuta"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    const reaudicao = document.querySelector('input[name="modo-escuta"]:checked')?.value === 'reaudicao';
+    document.getElementById('grupo-selecao-reaudicao').classList.toggle('escondido', !reaudicao);
+    document.getElementById('novo-album-fonte').required = reaudicao;
+  });
+});
+
+document.getElementById('novo-album-fonte').addEventListener('change', (event) => {
+  const fonte = obterFonteReaudicao(event.target.value);
+  const resumo = document.getElementById('novo-album-fonte-resumo');
+  if (!fonte) {
+    resumo.textContent = '';
+    return;
+  }
+  const nome = fonte.nomeCaderno || fonte.nome || 'Álbum sem nome';
+  const banda = fonte.bandaCaderno || fonte.banda || 'Artista não informado';
+  const nota = fonte.notaAntiga ?? fonte.media;
+  resumo.textContent = `${banda} · ${nome}${nota !== undefined ? ` · Nota anterior ${Number(nota).toFixed(1)}` : ''}`;
+});
+
+document.getElementById('form-novo-album-inteligente').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const modo = document.querySelector('input[name="modo-escuta"]:checked')?.value;
+  if (modo === 'reaudicao') {
+    const fonte = obterFonteReaudicao(document.getElementById('novo-album-fonte').value);
+    if (!fonte) return mostrarToast('Selecione um álbum para reouvir.', 'erro');
+    const cadernoJaIntegrado = fonte.tipoCatalogo === 'caderno' && fonte.integradoAlbumPrincipal;
+    if (cadernoJaIntegrado) return mostrarToast('Este registro do Caderno já foi reouvido. Use Editar no card para ajustar a avaliação.', 'erro');
+    const reaudicaoAnterior = reaudicoesLista.find((item) => fonte.tipoCatalogo === 'album'
+      ? item.albumIdOriginal === fonte.id && item.integradoAlbumPrincipal
+      : item.id === fonte.id && item.integradoAlbumPrincipal);
+    if (reaudicaoAnterior && !confirm('Já existe uma ré-audição para este álbum. Registrar outra avaliação mesmo assim?')) return;
+    document.getElementById('modal-novo-album-inteligente').classList.add('escondido');
+    iniciarAvaliacaoCompleta(fonte);
+    return;
+  }
+  document.getElementById('modal-novo-album-inteligente').classList.add('escondido');
+  prepararNovoAlbum();
+  navegarPara('sec-novo-album');
+});
+
+function atualizarMetricasReaudicao() {
+  const completas = reaudicoesLista.filter((item) => !item.registroRapido || item.integradoAlbumPrincipal);
+  const vinculadas = completas.filter(temNotaOriginal);
+  const mediaNova = completas.length
+    ? completas.reduce((soma, item) => soma + Number(item.nota || 0), 0) / completas.length
+    : 0;
+  const mediaOriginal = vinculadas.length
+    ? vinculadas.reduce((soma, item) => soma + Number(item.notaOriginal), 0) / vinculadas.length
+    : 0;
+  const variacoes = vinculadas.map((item) => ({ ...item, variacao: Number(item.nota || 0) - Number(item.notaOriginal) }));
+  const maiorGanho = [...variacoes].sort((a, b) => b.variacao - a.variacao)[0];
+  const maiorQueda = [...variacoes].sort((a, b) => a.variacao - b.variacao)[0];
+
+  document.getElementById('reaudicao-total').textContent = String(completas.length);
+  document.getElementById('reaudicao-medias').textContent = `${mediaNova.toFixed(1)} / ${vinculadas.length ? mediaOriginal.toFixed(1) : '—'}`;
+  document.getElementById('reaudicao-maior-ganho').textContent = maiorGanho && maiorGanho.variacao > 0
+    ? `${maiorGanho.album} (+${maiorGanho.variacao.toFixed(1)})`
+    : 'Ainda sem ganho';
+  document.getElementById('reaudicao-maior-queda').textContent = maiorQueda && maiorQueda.variacao < 0
+    ? `${maiorQueda.album} (${maiorQueda.variacao.toFixed(1)})`
+    : 'Ainda sem queda';
+}
+
+function renderizarReaudicoes() {
+  const container = document.getElementById('lista-reaudicoes');
+  if (!container) return;
+  atualizarMetricasReaudicao();
+  renderizarGraficoReaudicoes();
+  renderizarBarrasComparacaoReaudicoes();
+  const notasComparacao = reaudicoesLista.flatMap((item) => {
+    const antigas = Number.parseFloat(item.notaAntiga ?? item.notaOriginal ?? item.notaCaderno ?? item.mediaAntiga);
+    const atuais = Number.parseFloat(item.notaAtual ?? item.media ?? item.nota);
+    return [antigas, ...((!item.registroRapido || item.integradoAlbumPrincipal) ? [atuais] : [])].filter(Number.isFinite);
+  });
+  const menorNotaComparacao = notasComparacao.length ? Math.min(...notasComparacao) : 0;
+  const maiorNotaComparacao = notasComparacao.length ? Math.max(...notasComparacao) : 10;
+  if (!reaudicoesLista.length) {
+    container.innerHTML = '<p class="empty-state">Nenhuma ré-audição registrada.</p>';
+    atualizarOpcoesComparador();
+    return;
+  }
+
+  container.innerHTML = reaudicoesLista.map((item) => {
+    const registroRapido = Boolean(item.registroRapido && !item.integradoAlbumPrincipal);
+    const vinculada = temNotaOriginal(item);
+    const notaAntiga = Number(item.notaAntiga ?? item.notaOriginal ?? item.nota ?? 0);
+    const variacao = Number(item.nota || 0) - notaAntiga;
+    const estado = variacao > 0 ? 'subiu' : variacao < 0 ? 'caiu' : 'igual';
+    const tempo = vinculada && item.dataOriginal && !registroRapido
+      ? `Reouvido após ${calcularIntervaloAudicoes(item.dataOriginal, item.dataReouvido)}`
+      : '';
+    const capa = item.capa || '';
+    const imagemCard = capa ? `<img class="reaudicao-par-capa" src="${escaparHtml(capa)}" alt="Capa de ${escaparHtml(item.album)}" loading="lazy">` : '';
+    const temOriginal = registroRapido || vinculada;
+    const acoesOriginal = item.origem === 'caderno_antigo'
+      ? `<div class="reaudicao-card-acoes"><button type="button" class="btn-alerta" data-caderno-editar="${escaparHtml(item.id)}">Editar</button><button type="button" class="btn-perigo" data-caderno-excluir="${escaparHtml(item.id)}">Excluir</button></div>`
+      : item.albumIdOriginal
+        ? `<div class="reaudicao-card-acoes"><button type="button" class="btn-alerta" data-original-editar="${escaparHtml(item.albumIdOriginal)}">Editar</button><button type="button" class="btn-perigo" data-original-excluir="${escaparHtml(item.albumIdOriginal)}">Excluir</button></div>`
+        : '';
+    const esquerda = temOriginal ? `
+      <article class="reaudicao-par-card caderno-card nota-gradiente" style="--nota-cor: ${calcularCorPorNota(notaAntiga, menorNotaComparacao, maiorNotaComparacao)}">
+        <span class="reaudicao-par-tipo">${item.origem === 'caderno_antigo' ? 'Caderno Antigo' : 'Audição Original'}</span>
+        ${(item.imagemCaderno || capa) ? `<img class="reaudicao-par-capa" src="${escaparHtml(item.imagemCaderno || capa)}" alt="Capa de ${escaparHtml(item.nomeCaderno || item.album)}" loading="lazy">` : ''}
+        <h3>${escaparHtml(item.nomeCaderno || item.album || 'Álbum sem nome')}</h3>
+        <p class="album-artist">${escaparHtml(item.bandaCaderno || item.banda || 'Artista não informado')}</p>
+        <span class="reaudicao-par-tipo">${item.origem === 'caderno_antigo' ? 'Nota original do caderno' : 'Nota original'}</span>
+        <strong class="reaudicao-par-nota">${notaAntiga.toFixed(1)}</strong>
+        <time>1ª escuta: ${formatarDataReaudicao(item.dataOriginal || item.criadoEm)}</time>
+        ${acoesOriginal}
+      </article>` : '';
+    const direita = registroRapido
+      ? `<article class="reaudicao-par-card reaudicao-pendente"><span class="reaudicao-par-tipo">Ré-audição</span><h3>Aguardando nova avaliação</h3><p>Selecione este álbum em “Registrar Ré-audição” para preencher a avaliação completa.</p></article>`
+      : `<article class="reaudicao-par-card reaudicao-atual nota-gradiente ${estado}" style="--nota-cor: ${calcularCorPorNota(item.nota, menorNotaComparacao, maiorNotaComparacao)}">
+          <div class="reaudicao-atual-topo"><span class="reaudicao-par-tipo">Ré-audição</span><span class="reaudicao-delta-badge ${estado}">${variacao > 0 ? 'Subiu 📈' : variacao < 0 ? 'Caiu 📉' : 'Nota igual ='}</span></div>
+          ${imagemCard}
+          <h3>${escaparHtml(item.album || 'Álbum sem nome')}</h3>
+          <p class="album-artist">${escaparHtml(item.banda || 'Artista não informado')}</p>
+          <strong class="reaudicao-par-nota">${Number(item.nota || 0).toFixed(1)}</strong>
+          <time>Ré-audição: ${formatarDataReaudicao(item.dataReouvido)}</time>
+          ${tempo ? `<span class="reaudicao-badge">${tempo}</span>` : ''}
+          <p class="reaudicao-par-comparativo">Nota antiga: ${notaAntiga.toFixed(1)} → Nova nota: ${Number(item.nota || 0).toFixed(1)} (${variacao > 0 ? '+' : ''}${variacao.toFixed(1)})</p>
+          ${item.observacoes ? `<p class="reaudicao-observacao">${escaparHtml(item.observacoes)}</p>` : ''}
+              <div class="reaudicao-card-acoes"><button type="button" class="btn-alerta" data-reaudicao-editar="${escaparHtml(item.id)}">Editar</button><button type="button" class="btn-perigo reaudicao-excluir" data-reaudicao-excluir="${escaparHtml(item.id)}" aria-label="Excluir ré-audição de ${escaparHtml(item.album)}">Excluir</button></div>
+        </article>`;
+            return `<section class="reaudicao-par ${!temOriginal ? 'avulsa' : registroRapido ? 'aguardando' : estado}">${esquerda}${direita}</section>`;
+  }).join('');
+  atualizarOpcoesComparador();
+}
+
+function renderizarGraficoReaudicoes() {
+  const canvas = document.getElementById('grafico-evolucao-reaudicoes');
+  const seletor = document.getElementById('reaudicao-filtro-banda');
+  if (!canvas || !seletor || typeof Chart === 'undefined') return;
+  const bandas = [...new Set([
+    ...reaudicaoAlbunsBase.map((item) => item.banda),
+    ...reaudicoesLista.map((item) => item.banda)
+  ].map((banda) => String(banda || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const bandaAtual = seletor.value;
+  seletor.innerHTML = '<option value="">Selecione uma banda</option>' + bandas
+    .map((banda) => `<option value="${escaparHtml(banda)}">${escaparHtml(banda)}</option>`).join('');
+  if (bandas.includes(bandaAtual)) seletor.value = bandaAtual;
+  if (!seletor.dataset.bound) {
+    seletor.addEventListener('change', renderizarGraficoReaudicoes);
+    seletor.dataset.bound = 'true';
+  }
+
+  if (reaudicaoEvolucaoChart) reaudicaoEvolucaoChart.destroy();
+  const artista = seletor.value;
+  if (!artista) return;
+  const pontosOriginais = reaudicaoAlbunsBase
+    .filter((item) => String(item.banda || '').trim() === artista)
+    .map((item) => ({ x: converterDataReaudicao(item.criadoEm)?.getTime(), y: Number(item.media), album: item.nome, tipo: 'Audição original' }))
+    .filter((item) => Number.isFinite(item.x) && Number.isFinite(item.y));
+  const pontosReaudicao = reaudicoesLista
+    .filter((item) => String(item.banda || '').trim() === artista)
+    .flatMap((item) => {
+      const pontos = [];
+      if (item.origem === 'caderno_antigo' && temNotaOriginal(item) && item.dataOriginal) {
+        pontos.push({ x: converterDataReaudicao(item.dataOriginal)?.getTime(), y: Number(item.notaOriginal), album: item.album, tipo: 'Caderno antigo' });
+      }
+      if (item.registroRapido && !item.integradoAlbumPrincipal) return pontos;
+      pontos.push({ x: converterDataReaudicao(item.dataReouvido)?.getTime(), y: Number(item.nota), album: item.album, tipo: 'Ré-audição' });
+      return pontos;
+    })
+    .filter((item) => Number.isFinite(item.x) && Number.isFinite(item.y));
+  const pontos = [...pontosOriginais, ...pontosReaudicao].sort((a, b) => a.x - b.x);
+  reaudicaoEvolucaoChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { datasets: [{
+      label: `Nota · ${artista}`,
+      data: pontos,
+      parsing: false,
+      borderColor: '#34d399',
+      backgroundColor: 'rgba(52, 211, 153, 0.16)',
+      pointBackgroundColor: pontos.map((ponto) => ponto.tipo === 'Ré-audição' ? '#fbbf24' : '#60a5fa'),
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      borderWidth: 2,
+      tension: 0.25,
+      fill: false
+    }] },
+    options: {
+      responsive: true,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e5e7eb' } },
+        tooltip: { callbacks: {
+          title: (items) => {
+            const data = items[0]?.raw;
+            return data ? `${data.album} · ${data.tipo}` : '';
+          },
+          label: (item) => `Nota: ${Number(item.raw.y).toFixed(1)}`
+        } }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          ticks: { color: '#cbd5e1', maxTicksLimit: 8, callback: (valor) => new Intl.DateTimeFormat('pt-BR').format(new Date(Number(valor))) },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+          title: { display: true, text: 'Data da audição', color: '#e5e7eb' }
+        },
+        y: {
+          min: 0, max: 10,
+          ticks: { color: '#cbd5e1', stepSize: 2 },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+          title: { display: true, text: 'Nota média', color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+}
+
+function renderizarBarrasComparacaoReaudicoes() {
+  const canvas = document.getElementById('grafico-barras-reaudicoes');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (reaudicaoComparacaoChart) {
+    reaudicaoComparacaoChart.destroy();
+    reaudicaoComparacaoChart = null;
+  }
+  const comparacoes = reaudicoesLista.flatMap((item) => {
+    if ((item.registroRapido && !item.integradoAlbumPrincipal) || !temNotaOriginal(item)) return [];
+    const notaAntiga = Number.parseFloat(item.notaAntiga ?? item.notaOriginal ?? item.notaCaderno ?? item.mediaAntiga);
+    const notaAtual = Number.parseFloat(item.notaAtual ?? item.media ?? item.nota);
+    if (!Number.isFinite(notaAntiga) || !Number.isFinite(notaAtual) || notaAntiga < 0 || notaAntiga > 10 || notaAtual < 0 || notaAtual > 10) return [];
+    return [{
+      notaAntiga,
+      notaAtual,
+      album: String(item.nomeAlbum || item.album || item.nome || 'Álbum sem nome'),
+      banda: String(item.nomeBanda || item.banda || 'Artista não informado')
+    }];
+  });
+  reaudicaoComparacaoChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: comparacoes.map((item) => item.album),
+      datasets: [{
+        label: 'Nota Antiga - Caderno',
+        data: comparacoes.map((item) => item.notaAntiga),
+        backgroundColor: 'rgba(127, 140, 141, 0.78)',
+        borderColor: '#7f8c8d',
+        borderWidth: 1,
+        borderRadius: 4
+      }, {
+        label: 'Nota Atual - Ré-audição',
+        data: comparacoes.map((item) => item.notaAtual),
+        backgroundColor: comparacoes.map((item) => `${calcularCorPorNota(item.notaAtual)}d9`),
+        borderColor: comparacoes.map((item) => calcularCorPorNota(item.notaAtual)),
+        borderWidth: 1,
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e5e7eb' } },
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const item = comparacoes[context.dataIndex];
+              return `${item.banda} - ${item.album} | Caderno: ${item.notaAntiga.toFixed(1)} ➔ Ré-audição: ${item.notaAtual.toFixed(1)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: false, ticks: { color: '#cbd5e1', autoSkip: true, maxRotation: 35, minRotation: 0 }, grid: { display: false }, title: { display: true, text: 'Álbuns reouvidos', color: '#e5e7eb' } },
+        y: { min: 0, max: 10, ticks: { color: '#cbd5e1', stepSize: 2 }, grid: { color: 'rgba(255,255,255,0.08)' }, title: { display: true, text: 'Nota (0 a 10)', color: '#e5e7eb' } }
+      }
+    }
+  });
+}
+
+function obterPontosComparacao(valor) {
+  const [tipo, id] = valor.split(':');
+  const item = reaudicoesLista.find((registro) => registro.id === id);
+  if (!item) return null;
+  if (tipo === 'original') {
+    return {
+      titulo: `${item.album} · Original`, banda: item.banda, nota: Number(item.notaOriginal),
+      data: item.dataOriginal, observacoes: item.observacoesOriginal || '', tipo: 'Original'
+    };
+  }
+  return {
+    titulo: `${item.album} · Ré-audição`, banda: item.banda, nota: Number(item.nota || 0),
+    data: item.dataReouvido, observacoes: item.observacoes || '', tipo: 'Ré-audição'
+  };
+}
+
+function atualizarOpcoesComparador() {
+  const primeiro = document.getElementById('comparar-reaudicao-a');
+  const segundo = document.getElementById('comparar-reaudicao-b');
+  if (!primeiro || !segundo) return;
+  const options = [];
+  reaudicoesLista.forEach((item) => {
+    if (temNotaOriginal(item)) {
+      options.push(`<option value="original:${escaparHtml(item.id)}">${escaparHtml(item.album)} · Original (${Number(item.notaOriginal).toFixed(1)})</option>`);
+    }
+    if (item.registroRapido && !item.integradoAlbumPrincipal) return;
+    options.push(`<option value="reaudicao:${escaparHtml(item.id)}">${escaparHtml(item.album)} · ${formatarDataReaudicao(item.dataReouvido)} (${Number(item.nota || 0).toFixed(1)})</option>`);
+  });
+  const anteriorA = primeiro.value;
+  const anteriorB = segundo.value;
+  const markup = options.length ? options.join('') : '<option value="">Nenhuma audição disponível</option>';
+  primeiro.innerHTML = markup;
+  segundo.innerHTML = markup;
+  if ([...primeiro.options].some((option) => option.value === anteriorA)) primeiro.value = anteriorA;
+  if ([...segundo.options].some((option) => option.value === anteriorB)) segundo.value = anteriorB;
+  if (primeiro.options.length > 1 && primeiro.value === segundo.value) segundo.selectedIndex = 1;
+  renderizarComparacao();
+}
+
+function renderizarComparacao() {
+  const resultado = document.getElementById('comparador-resultado');
+  const a = obterPontosComparacao(document.getElementById('comparar-reaudicao-a')?.value || '');
+  const b = obterPontosComparacao(document.getElementById('comparar-reaudicao-b')?.value || '');
+  if (!resultado) return;
+  if (!a || !b) {
+    resultado.innerHTML = '<p class="empty-state">Registre ao menos uma ré-audição vinculada a um álbum para comparar.</p>';
+    return;
+  }
+  const diferenca = b.nota - a.nota;
+  const intervalo = a.data && b.data ? calcularIntervaloAudicoes(a.data, b.data) : 'Data indisponível';
+  resultado.innerHTML = `
+    <div class="comparador-cards">
+      ${[a, b].map((item) => `<article class="comparador-card"><span class="comparador-tipo">${item.tipo}</span><h4>${escaparHtml(item.titulo)}</h4><p>${escaparHtml(item.banda || '')}</p><strong class="comparador-nota">${item.nota.toFixed(1)}</strong><time>${formatarDataReaudicao(item.data)}</time><p class="comparador-observacao">${escaparHtml(item.observacoes || 'Sem observações.')}</p></article>`).join('')}
+    </div>
+    <p class="comparador-resumo">Variação: <strong class="${diferenca > 0 ? 'ganho' : diferenca < 0 ? 'queda' : 'estavel'}">${diferenca > 0 ? '+' : ''}${diferenca.toFixed(1)}</strong><span>Intervalo entre as audições: ${intervalo}</span></p>`;
+}
+
+function subscribeReaudicoes() {
+  if (!usuarioAtual) return;
+  carregarAlbunsParaReaudicao().catch((erro) => {
+    console.error('Erro ao carregar álbuns para ré-audição:', erro);
+  });
+  const consulta = query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid));
+  if (reaudicoesUnsubscribe) reaudicoesUnsubscribe();
+  reaudicoesUnsubscribe = onSnapshot(consulta, (snapshot) => {
+    const atuais = snapshot.docs.map((item) => normalizarDocumentoReaudicao(item.id, item.data()));
+    const chavesAtuais = new Set(atuais.map((item) => `${item.colecaoDados}:${item.firestoreId}`));
+    reaudicoesLista = [...atuais, ...reaudicoesLegadas.filter((item) => !chavesAtuais.has(`${item.colecaoDados}:${item.firestoreId}`))]
+      .sort((a, b) => (converterDataReaudicao(b.dataReouvido)?.getTime() || 0) - (converterDataReaudicao(a.dataReouvido)?.getTime() || 0));
+    renderizarReaudicoes();
+    const telaDashboard = document.getElementById('sec-dashboard');
+    if (telaDashboard && !telaDashboard.classList.contains('escondido')) carregarAlbuns();
+  }, (erro) => {
+    console.error('Erro ao acompanhar ré-audições:', erro);
+    document.getElementById('lista-reaudicoes').innerHTML = '<p class="empty-state">Não foi possível carregar as ré-audições.</p>';
+  });
+}
+
+async function abrirModalReaudicao() {
+  try {
+    await carregarAlbunsParaReaudicao();
+  } catch (erro) {
+    console.error('Erro ao atualizar seleção de álbuns:', erro);
+  }
+  document.getElementById('form-reaudicao').reset();
+  document.getElementById('form-caderno-antigo').reset();
+  document.getElementById('form-caderno-antigo').classList.add('escondido');
+  document.getElementById('form-reaudicao').classList.remove('escondido');
+  preencherSelectAlbunsReaudicao();
+  document.getElementById('modal-reaudicao').classList.remove('escondido');
+  document.getElementById('reaudicao-album-existente').focus();
+}
+
+document.getElementById('btn-nova-reaudicao').addEventListener('click', abrirModalReaudicao);
+document.getElementById('btn-mostrar-caderno-antigo').addEventListener('click', () => {
+  document.getElementById('form-reaudicao').classList.add('escondido');
+  document.getElementById('form-caderno-antigo').classList.remove('escondido');
+  document.getElementById('caderno-banda').focus();
+});
+document.getElementById('btn-voltar-selecao-caderno').addEventListener('click', () => {
+  document.getElementById('form-caderno-antigo').classList.add('escondido');
+  document.getElementById('form-reaudicao').classList.remove('escondido');
+});
+function abrirEdicaoCaderno(id) {
+  const item = reaudicoesLista.find((registro) => registro.id === id);
+  if (!item) return;
+  document.getElementById('form-reaudicao').classList.add('escondido');
+  document.getElementById('form-caderno-antigo').classList.remove('escondido');
+  document.getElementById('caderno-id').value = id;
+  document.getElementById('caderno-banda').value = item.bandaCaderno || item.banda || '';
+  document.getElementById('caderno-album').value = item.nomeCaderno || item.album || '';
+  document.getElementById('caderno-nota').value = item.notaAntiga ?? item.notaOriginal ?? item.nota ?? '';
+  document.getElementById('caderno-ano').value = item.anoCaderno || item.ano || '';
+  document.getElementById('caderno-capa').value = String(item.imagemCaderno || item.capa || '').startsWith('data:') ? '' : item.imagemCaderno || item.capa || '';
+  document.getElementById('caderno-data-escuta').value = (converterDataReaudicao(item.dataOriginal || item.criadoEm) || new Date()).toISOString().slice(0, 10);
+  document.getElementById('modal-reaudicao').classList.remove('escondido');
+  document.getElementById('caderno-banda').focus();
+}
+
+function abrirEdicaoReaudicao(id) {
+  const item = reaudicoesLista.find((registro) => registro.id === id);
+  if (!item) return;
+  prepararNovoAlbum();
+  reaudicaoModoAtivo = true;
+  reaudicaoEditandoId = id;
+  reaudicaoAlbumOriginal = null;
+  document.getElementById('album-nome').value = item.album || item.nome || '';
+  document.getElementById('album-banda').value = item.banda || '';
+  document.getElementById('album-ano').value = item.ano || '';
+  document.getElementById('album-favorita').value = item.favorita || '';
+  document.getElementById('album-obs').value = item.observacoes || item.obs || '';
+  document.getElementById('album-duracao').value = item.duracao || '';
+  definirTimerAudicao(item.duracaoSegundos || 0, obterSufixoTimerReaudicao(item));
+  if (String(item.capa || '').startsWith('data:image/')) {
+    imagemBase64Temp = item.capa;
+    document.getElementById('album-imagem').value = '';
+    document.getElementById('img-preview').src = item.capa;
+    document.getElementById('preview-container').classList.remove('escondido');
+  } else {
+    document.getElementById('album-imagem').value = item.capa || '';
+  }
+  containerFaixas.innerHTML = '';
+  (item.faixas || []).forEach((faixa) => addLinhaFaixa(faixa.nome || '', faixa.classificacao || 'Boa'));
+  if (!item.faixas?.length) addLinhaFaixa();
+  document.getElementById('form-titulo').textContent = `Editar ré-audição: ${item.album || item.nome || 'Álbum'}`;
+  document.getElementById('btn-salvar').textContent = 'Atualizar Ré-audição';
+  navegarPara('sec-novo-album');
+}
+
+document.getElementById('form-caderno-antigo').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!validarUsuarioParaSalvar()) return;
+  try {
+    const id = document.getElementById('caderno-id').value;
+    const itemAnterior = id ? reaudicoesLista.find((registro) => registro.id === id) : null;
+    const bandaCaderno = document.getElementById('caderno-banda').value.trim();
+    const nomeCaderno = document.getElementById('caderno-album').value.trim();
+    const duplicado = await buscarAlbumDuplicado(bandaCaderno, nomeCaderno, itemAnterior, 'caderno');
+    if (duplicado) {
+      mostrarToast('Este álbum já existe no seu catálogo. Use o fluxo de ré-audição.', 'erro');
+      return;
+    }
+    const arquivo = document.getElementById('caderno-capa-arquivo');
+    const imagem = await lerCapaCadernoCompactada(arquivo);
+    const notaAntiga = Number(document.getElementById('caderno-nota').value);
+    const dataEscutaInput = document.getElementById('caderno-data-escuta').value;
+    const dataEscuta = dataEscutaInput
+      ? new Date(`${dataEscutaInput}T12:00:00`).toISOString()
+      : new Date().toISOString();
+    const editandoCaderno = Boolean(id);
+    const imagemFinal = imagem || document.getElementById('caderno-capa').value.trim() || itemAnterior?.imagemCaderno || itemAnterior?.capa || '';
+    const dados = {
+      origem: 'caderno_antigo',
+      userId: usuarioAtual.uid,
+      bandaCaderno: document.getElementById('caderno-banda').value.trim(),
+      nomeCaderno: document.getElementById('caderno-album').value.trim(),
+      imagemCaderno: imagemFinal,
+      anoCaderno: Number(document.getElementById('caderno-ano').value) || null,
+      notaAntiga,
+      ...(itemAnterior?.integradoAlbumPrincipal ? { notaOriginal: notaAntiga } : { notaOriginal: notaAntiga, banda: document.getElementById('caderno-banda').value.trim(), nome: document.getElementById('caderno-album').value.trim(), imagem: imagemFinal, ano: Number(document.getElementById('caderno-ano').value) || null, dataReouvido: dataEscuta }),
+      dataOriginal: dataEscuta,
+      atualizadoEm: serverTimestamp()
+    };
+    if (id) {
+      await updateDoc(itemAnterior ? obterRefReaudicao(itemAnterior) : doc(db, 'historico_reaudicoes', id), dados);
+    } else {
+      await addDoc(collection(db, 'historico_reaudicoes'), {
+        ...dados,
+        banda: dados.bandaCaderno,
+        nome: dados.nomeCaderno,
+        imagem: imagemFinal,
+        ano: dados.anoCaderno,
+        dataReouvido: dataEscuta,
+        criadoEm: serverTimestamp(),
+        integradoAlbumPrincipal: false,
+        registroRapido: true
+      });
+    }
+    document.getElementById('form-caderno-antigo').reset();
+    document.getElementById('form-caderno-antigo').classList.add('escondido');
+    document.getElementById('form-reaudicao').classList.remove('escondido');
+    if (editandoCaderno) document.getElementById('modal-reaudicao').classList.add('escondido');
+    mostrarToast(editandoCaderno ? 'Caderno Antigo atualizado.' : 'Registro salvo no Caderno Antigo.');
+    carregarAlbunsParaReaudicao().catch((erro) => console.error('Falha ao atualizar catálogo após salvar Caderno:', erro));
+  } catch (erro) {
+    console.error('Erro ao salvar no Caderno Antigo:', erro);
+    const mensagem = erro?.code === 'permission-denied'
+      ? 'O Firestore negou a gravação. Confira as regras publicadas para historico_reaudicoes.'
+      : erro?.code === 'resource-exhausted'
+        ? 'A imagem ainda excede o limite aceito pelo Firestore.'
+        : 'Não foi possível salvar no Caderno Antigo.';
+    mostrarToast(mensagem, 'erro');
+  }
+});
+
+document.getElementById('form-reaudicao').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const fonteSelecionada = obterFonteReaudicao(document.getElementById('reaudicao-album-existente').value);
+  document.getElementById('modal-reaudicao').classList.add('escondido');
+  iniciarAvaliacaoCompleta(fonteSelecionada);
+});
+
+document.getElementById('lista-reaudicoes').addEventListener('click', async (event) => {
+  const editarCaderno = event.target.closest('[data-caderno-editar]');
+  const excluirCaderno = event.target.closest('[data-caderno-excluir]');
+  const editarReaudicao = event.target.closest('[data-reaudicao-editar]');
+  const excluirReaudicao = event.target.closest('[data-reaudicao-excluir]');
+  const editarOriginal = event.target.closest('[data-original-editar]');
+  const excluirOriginal = event.target.closest('[data-original-excluir]');
+
+  if (editarCaderno) return abrirEdicaoCaderno(editarCaderno.dataset.cadernoEditar);
+  if (editarReaudicao) return abrirEdicaoReaudicao(editarReaudicao.dataset.reaudicaoEditar);
+  if (editarOriginal) return window.editarAlbum(editarOriginal.dataset.originalEditar);
+
+  try {
+    if (excluirCaderno) {
+      const item = reaudicoesLista.find((registro) => registro.id === excluirCaderno.dataset.cadernoExcluir);
+      if (!item) return;
+      if (item.integradoAlbumPrincipal) {
+        const manterReaudicao = confirm('Excluir o Caderno Antigo e manter a Ré-audição como escuta avulsa, removendo a comparação?');
+        if (!manterReaudicao) return;
+        await updateDoc(obterRefReaudicao(item), {
+          origem: 'avaliacao_manual',
+          nomeCaderno: null,
+          bandaCaderno: null,
+          imagemCaderno: null,
+          anoCaderno: null,
+          notaOriginal: null,
+          notaAntiga: null,
+          dataOriginal: null,
+          albumIdOriginal: null,
+          registroRapido: false,
+          integradoAlbumPrincipal: true,
+          atualizadoEm: serverTimestamp()
+        });
+      } else {
+        if (!confirm('Excluir este registro do Caderno Antigo?')) return;
+        await deleteDoc(obterRefReaudicao(item));
+      }
+      mostrarToast('Registro do Caderno atualizado.');
+      return;
+    }
+
+    if (excluirReaudicao) {
+      const item = reaudicoesLista.find((registro) => registro.id === excluirReaudicao.dataset.reaudicaoExcluir);
+      if (!item || !confirm('Excluir somente esta Ré-audição?')) return;
+      if (item.origem === 'caderno_antigo' && item.integradoAlbumPrincipal) {
+        await updateDoc(obterRefReaudicao(item), {
+          nome: item.nomeCaderno || item.album,
+          banda: item.bandaCaderno || item.banda,
+          imagem: item.imagemCaderno || item.capa || '',
+          ano: item.anoCaderno || item.ano || null,
+          media: null,
+          somaNotas: null,
+          nmp: null,
+          faixas: [],
+          obs: '',
+          favorita: '',
+          duracao: '',
+          duracaoSegundos: 0,
+          notaOriginal: item.notaAntiga,
+          dataOriginal: item.dataOriginal,
+          dataReouvido: item.dataOriginal,
+          registroRapido: true,
+          integradoAlbumPrincipal: false,
+          atualizadoEm: serverTimestamp()
+        });
+      } else {
+        await deleteDoc(obterRefReaudicao(item));
+      }
+      mostrarToast('Ré-audição removida; o registro original foi preservado.');
+      return;
+    }
+
+    if (excluirOriginal) {
+      const item = reaudicoesLista.find((registro) => registro.albumIdOriginal === excluirOriginal.dataset.originalExcluir);
+      if (!item || !confirm('Excluir o álbum original de Meus Álbuns e manter a Ré-audição como escuta avulsa?')) return;
+      await deleteDoc(doc(db, 'albuns', item.albumIdOriginal));
+      await updateDoc(obterRefReaudicao(item), {
+        origem: 'avaliacao_manual',
+        notaOriginal: null,
+        notaAntiga: null,
+        dataOriginal: null,
+        albumIdOriginal: null,
+        integradoAlbumPrincipal: true,
+        atualizadoEm: serverTimestamp()
+      });
+      mostrarToast('Álbum original removido e comparação desvinculada.');
+    }
+  } catch (erro) {
+    console.error('Erro ao atualizar registros de audição:', erro);
+    mostrarToast('Não foi possível concluir a ação.', 'erro');
+  }
+});
+
+document.getElementById('btn-comparar-reaudicoes').addEventListener('click', () => {
+  atualizarOpcoesComparador();
+  document.getElementById('modal-comparar-reaudicoes').classList.remove('escondido');
+});
+['comparar-reaudicao-a', 'comparar-reaudicao-b'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', renderizarComparacao);
+});
+document.querySelectorAll('[data-fechar-modal]').forEach((botao) => {
+  botao.addEventListener('click', () => document.getElementById(botao.dataset.fecharModal)?.classList.add('escondido'));
+});
+['modal-reaudicao', 'modal-comparar-reaudicoes'].forEach((id) => {
+  document.getElementById(id).addEventListener('click', (event) => {
+    if (event.target.id === id) event.currentTarget.classList.add('escondido');
+  });
+});
+
 // OBSERVAÇÕES
 function subscribeObservacoes() {
   if (!usuarioAtual) return;
@@ -1598,6 +2544,127 @@ function converterDuracaoParaSegundos(valor, fallback = 0) {
   return Number.isFinite(numero) && numero > 0 ? Math.round(numero * 60) : 0;
 }
 
+function obterUsuarioTimerId() {
+  return usuarioAtual?.uid || auth.currentUser?.uid || 'anonimo';
+}
+
+function obterChaveTimerStorage(timerId = timerAudicaoId) {
+  return `musicbox:timer:${obterUsuarioTimerId()}:${timerId}`;
+}
+
+function obterChaveRascunhoTimer() {
+  return `musicbox:timer-rascunho:${obterUsuarioTimerId()}`;
+}
+
+function obterSufixoTimerReaudicao(item) {
+  if (item.albumIdOriginal) return `album:${item.albumIdOriginal}`;
+  const colecao = item.colecaoDados || 'historico_reaudicoes';
+  const id = item.firestoreId || item.id;
+  return item.origem === 'caderno_antigo'
+    ? `album:caderno:${colecao}:${id}`
+    : `album:reaudicao:${colecao}:${id}`;
+}
+
+function obterIdRascunhoTimer() {
+  try {
+    let id = localStorage.getItem(obterChaveRascunhoTimer());
+    if (!id) {
+      id = `rascunho-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem(obterChaveRascunhoTimer(), id);
+    }
+    return id;
+  } catch (erro) {
+    return `rascunho-${obterUsuarioTimerId()}`;
+  }
+}
+
+function gravarTimerAudicao() {
+  if (!timerAudicaoId) return;
+  try {
+    localStorage.setItem(obterChaveTimerStorage(), JSON.stringify({
+      elapsedSeconds: timerAudicaoBaseSegundos,
+      startedAt: timerAudicaoIniciadoEm
+    }));
+  } catch (erro) {
+    console.warn('Não foi possível persistir o cronômetro localmente.', erro);
+  }
+}
+
+function atualizarTempoDecorridoTimer() {
+  timerAudicaoSegundos = timerAudicaoBaseSegundos + (timerAudicaoIniciadoEm
+    ? Math.max(0, Math.floor((Date.now() - timerAudicaoIniciadoEm) / 1000))
+    : 0);
+  atualizarDisplayTimer();
+}
+
+function iniciarIntervaloTimer() {
+  if (timerAudicaoIntervalo) return;
+  timerAudicaoIntervalo = window.setInterval(atualizarTempoDecorridoTimer, 1000);
+}
+
+function selecionarTimerAudicao(timerId, fallbackSegundos = 0) {
+  const proximoId = timerId || obterIdRascunhoTimer();
+  if (timerAudicaoId === proximoId) {
+    if (timerAudicaoIniciadoEm) iniciarIntervaloTimer();
+    atualizarTempoDecorridoTimer();
+    return;
+  }
+  if (timerAudicaoIntervalo) {
+    atualizarTempoDecorridoTimer();
+    timerAudicaoBaseSegundos = timerAudicaoSegundos;
+    timerAudicaoIniciadoEm = null;
+    window.clearInterval(timerAudicaoIntervalo);
+    timerAudicaoIntervalo = null;
+    gravarTimerAudicao();
+  }
+
+  timerAudicaoId = proximoId;
+  timerAudicaoBaseSegundos = Math.max(0, Number(fallbackSegundos) || 0);
+  timerAudicaoIniciadoEm = null;
+  try {
+    const salvo = JSON.parse(localStorage.getItem(obterChaveTimerStorage()) || 'null');
+    if (salvo) {
+      timerAudicaoBaseSegundos = Math.max(0, Number(salvo.elapsedSeconds) || 0);
+      timerAudicaoIniciadoEm = Number(salvo.startedAt) || null;
+    }
+  } catch (erro) {
+    console.warn('Estado salvo do cronômetro inválido; usando o tempo do álbum.', erro);
+  }
+  if (timerAudicaoId.startsWith('rascunho-')) {
+    try { localStorage.setItem(obterChaveRascunhoTimer(), timerAudicaoId); } catch {}
+  }
+  if (timerAudicaoIniciadoEm) iniciarIntervaloTimer();
+  atualizarTempoDecorridoTimer();
+}
+
+function migrarTimerAudicao(novoId) {
+  atualizarTempoDecorridoTimer();
+  const idAntigo = timerAudicaoId;
+  const chaveAntiga = obterChaveTimerStorage();
+  const estado = { elapsedSeconds: timerAudicaoSegundos, startedAt: timerAudicaoIniciadoEm };
+  timerAudicaoId = novoId;
+  timerAudicaoBaseSegundos = estado.elapsedSeconds;
+  try {
+    localStorage.setItem(obterChaveTimerStorage(), JSON.stringify(estado));
+    if (chaveAntiga !== obterChaveTimerStorage()) localStorage.removeItem(chaveAntiga);
+    if (String(idAntigo || '').startsWith('rascunho-') && localStorage.getItem(obterChaveRascunhoTimer()) === idAntigo) {
+      localStorage.removeItem(obterChaveRascunhoTimer());
+    }
+  } catch (erro) {
+    console.warn('Não foi possível associar o cronômetro ao ID salvo.', erro);
+  }
+}
+
+function limparTimerRascunhoSalvo() {
+  try {
+    const rascunho = localStorage.getItem(obterChaveRascunhoTimer());
+    if (rascunho) localStorage.removeItem(obterChaveTimerStorage(rascunho));
+    localStorage.removeItem(obterChaveRascunhoTimer());
+  } catch (erro) {
+    console.warn('Não foi possível limpar o cronômetro do rascunho.', erro);
+  }
+}
+
 function atualizarDisplayTimer() {
   const display = document.getElementById('audicao-tempo');
   const duracaoFormatada = formatarDuracao(timerAudicaoSegundos);
@@ -1607,36 +2674,62 @@ function atualizarDisplayTimer() {
 }
 
 function iniciarTimerAudicao() {
-  if (timerAudicaoIntervalo) return;
-  timerAudicaoIntervalo = window.setInterval(() => {
-    timerAudicaoSegundos += 1;
-    atualizarDisplayTimer();
-  }, 1000);
+  if (!timerAudicaoId) selecionarTimerAudicao(obterIdRascunhoTimer());
+  if (!timerAudicaoIniciadoEm) {
+    timerAudicaoBaseSegundos = timerAudicaoSegundos;
+    timerAudicaoIniciadoEm = Date.now();
+    gravarTimerAudicao();
+  }
+  iniciarIntervaloTimer();
+  atualizarTempoDecorridoTimer();
 }
 
 function pausarTimerAudicao() {
-  if (!timerAudicaoIntervalo) return;
-  window.clearInterval(timerAudicaoIntervalo);
+  if (!timerAudicaoIniciadoEm && !timerAudicaoIntervalo) return;
+  atualizarTempoDecorridoTimer();
+  timerAudicaoBaseSegundos = timerAudicaoSegundos;
+  timerAudicaoIniciadoEm = null;
+  if (timerAudicaoIntervalo) window.clearInterval(timerAudicaoIntervalo);
   timerAudicaoIntervalo = null;
+  gravarTimerAudicao();
 }
 
 function resetarTimerAudicao() {
   pausarTimerAudicao();
+  timerAudicaoBaseSegundos = 0;
   timerAudicaoSegundos = 0;
+  timerAudicaoIniciadoEm = null;
+  if (timerAudicaoId) {
+    try { localStorage.removeItem(obterChaveTimerStorage()); } catch {}
+  }
   atualizarDisplayTimer();
   const campoDuracao = document.getElementById('album-duracao');
   if (campoDuracao) campoDuracao.value = '';
 }
 
-function definirTimerAudicao(segundos = 0) {
-  pausarTimerAudicao();
-  timerAudicaoSegundos = Math.max(0, Number(segundos) || 0);
-  atualizarDisplayTimer();
+function definirTimerAudicao(segundos = 0, timerId = null) {
+  const id = timerId
+    ? (String(timerId).startsWith('album:') ? String(timerId) : `album:${timerId}`)
+    : document.getElementById('album-id')?.value ? `album:${document.getElementById('album-id').value}` : obterIdRascunhoTimer();
+  selecionarTimerAudicao(id, segundos);
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && timerAudicaoIniciadoEm) atualizarTempoDecorridoTimer();
+});
+window.addEventListener('pageshow', () => {
+  if (timerAudicaoIniciadoEm) atualizarTempoDecorridoTimer();
+});
+window.addEventListener('pagehide', gravarTimerAudicao);
 
 document.getElementById('btn-timer-iniciar').addEventListener('click', iniciarTimerAudicao);
 document.getElementById('btn-timer-pausar').addEventListener('click', pausarTimerAudicao);
 document.getElementById('btn-timer-resetar').addEventListener('click', resetarTimerAudicao);
+document.getElementById('btn-cancelar-album').addEventListener('click', () => {
+  const telaRetorno = reaudicaoModoAtivo ? 'sec-reaudicoes' : 'sec-dashboard';
+  prepararNovoAlbum();
+  navegarPara(telaRetorno);
+});
 
 function addLinhaFaixa(nome = '', nota = 'Boa') {
   const div = document.createElement('div');
@@ -1684,12 +2777,23 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     const id = document.getElementById('album-id').value;
     const nome = document.getElementById('album-nome').value;
     const banda = document.getElementById('album-banda').value;
+    if (!id && !reaudicaoModoAtivo) {
+      const duplicado = await buscarAlbumDuplicado(banda, nome);
+      if (duplicado) {
+        mostrarToast('Este álbum já existe no seu catálogo. Se deseja ouvi-lo novamente, escolha Ré-audição.', 'erro');
+        return;
+      }
+    }
+    atualizarTempoDecorridoTimer();
     const ano = Number(document.getElementById('album-ano').value);
     const urlImagemInput = document.getElementById('album-imagem').value;
     const favorita = document.getElementById('album-favorita').value;
     const obs = document.getElementById('album-obs').value;
-    const duracao = document.getElementById('album-duracao').value.trim();
-    const duracaoSegundos = converterDuracaoParaSegundos(duracao, timerAudicaoSegundos);
+    const duracaoInformada = document.getElementById('album-duracao').value.trim();
+    const duracao = timerAudicaoSegundos > 0 ? formatarDuracao(timerAudicaoSegundos) : duracaoInformada;
+    const duracaoSegundos = timerAudicaoSegundos > 0
+      ? timerAudicaoSegundos
+      : converterDuracaoParaSegundos(duracaoInformada);
 
     const imagemFinal = imagemBase64Temp || urlImagemInput || '';
     const faixasInputs = document.querySelectorAll('.linha-faixa');
@@ -1706,7 +2810,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
 
     if (faixas.length === 0) {
       btnSalvar.disabled = false;
-      btnSalvar.innerText = "Salvar Álbum";
+      btnSalvar.innerText = reaudicaoModoAtivo ? 'Salvar no Histórico' : 'Salvar Álbum';
       return mostrarToast("Adicione pelo menos uma faixa!", "erro");
     }
 
@@ -1714,7 +2818,40 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     const nmp = parseFloat(((media / 10) * 100).toFixed(1));
     const agoraISO = new Date().toISOString();
 
-    if (id) {
+    const salvandoReaudicao = reaudicaoModoAtivo;
+    let idFirestoreCriado = null;
+    const registroEmEdicao = reaudicaoEditandoId
+      ? reaudicoesLista.find((item) => item.id === reaudicaoEditandoId)
+      : null;
+    if (salvandoReaudicao) {
+      const registroHistorico = {
+        nome, banda, ano, imagem: imagemFinal, favorita, obs, faixas,
+        media, somaNotas, nmp, duracao, duracaoSegundos,
+        userId: usuarioAtual.uid,
+        origem: registroEmEdicao?.origem || (reaudicaoAlbumOriginal?.tipoCatalogo === 'caderno' ? 'caderno_antigo' : (reaudicaoAlbumOriginal ? 'album_principal' : 'avaliacao_manual')),
+        albumIdOriginal: registroEmEdicao?.albumIdOriginal || (reaudicaoAlbumOriginal?.tipoCatalogo === 'album' ? reaudicaoAlbumOriginal.id : null),
+        notaOriginal: registroEmEdicao ? registroEmEdicao.notaOriginal : reaudicaoAlbumOriginal ? Number(reaudicaoAlbumOriginal.media) : null,
+        notaAntiga: registroEmEdicao ? registroEmEdicao.notaAntiga : reaudicaoAlbumOriginal?.tipoCatalogo === 'caderno' ? Number(reaudicaoAlbumOriginal.notaAntiga ?? reaudicaoAlbumOriginal.notaOriginal) : null,
+        dataOriginal: registroEmEdicao ? registroEmEdicao.dataOriginal : reaudicaoAlbumOriginal?.criadoEm || null,
+        dataReouvido: serverTimestamp(),
+        atualizadoEm: serverTimestamp(),
+        integradoAlbumPrincipal: true,
+        registroRapido: false
+      };
+      if (registroEmEdicao) {
+        await updateDoc(obterRefReaudicao(registroEmEdicao), registroHistorico);
+      } else if (reaudicaoAlbumOriginal?.tipoCatalogo === 'caderno') {
+        await updateDoc(obterRefReaudicao(reaudicaoAlbumOriginal), registroHistorico);
+      } else {
+        const novoHistorico = await addDoc(collection(db, 'historico_reaudicoes'), { ...registroHistorico, criadoEm: serverTimestamp() });
+        idFirestoreCriado = obterSufixoTimerReaudicao({
+          ...registroHistorico,
+          colecaoDados: 'historico_reaudicoes',
+          firestoreId: novoHistorico.id
+        });
+      }
+      mostrarToast('Ré-audição salva no histórico!');
+    } else if (id) {
       const updateData = {
         nome, banda, ano, imagem: imagemFinal, favorita, obs, faixas,
         media, somaNotas, nmp, duracao, duracaoSegundos, atualizadoEm: agoraISO
@@ -1733,18 +2870,24 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
         atualizadoEm: agoraISO,
         userId: usuarioAtual.uid
       };
-      await addDoc(collection(db, "albuns"), novoData);
+      const novoAlbum = await addDoc(collection(db, "albuns"), novoData);
+      idFirestoreCriado = `album:${novoAlbum.id}`;
       mostrarToast("Álbum cadastrado com sucesso!");
     }
 
+    const timerEraRascunho = String(timerAudicaoId || '').startsWith('rascunho-');
+    if (idFirestoreCriado && timerEraRascunho) migrarTimerAudicao(idFirestoreCriado);
+    pausarTimerAudicao();
+    if (timerEraRascunho) limparTimerRascunhoSalvo();
     prepararNovoAlbum();
-    navegarPara('sec-dashboard');
+    navegarPara(salvandoReaudicao ? 'sec-reaudicoes' : 'sec-dashboard');
 
   } catch (erro) {
+    console.error('Erro ao salvar avaliação:', erro);
     mostrarToast("Erro ao salvar!", "erro");
   } finally {
     btnSalvar.disabled = false;
-    btnSalvar.innerText = "Salvar Álbum";
+    btnSalvar.innerText = reaudicaoModoAtivo ? 'Salvar no Histórico' : 'Salvar Álbum';
   }
 });
 
@@ -1754,13 +2897,67 @@ async function carregarAlbuns() {
   grid.innerHTML = 'Carregando...';
 
   try {
-    const q = query(collection(db, "albuns"), where("userId", "==", usuarioAtual.uid));
-    const snapshot = await getDocs(q);
+    const snapshot = await getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid)));
+    const documentosHistorico = [];
+    try {
+      const historico = await getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)));
+      historico.docs.forEach((docSnap) => documentosHistorico.push({ id: docSnap.id, data: docSnap.data(), origemColecao: 'historico' }));
+    } catch (erro) {
+      console.error('Não foi possível consultar historico_reaudicoes:', erro);
+      reaudicoesLista.forEach((registro) => documentosHistorico.push({ id: registro.id, data: registro, origemColecao: 'cache' }));
+    }
+    try {
+      const legados = await getDocs(query(collection(db, 'reaudicoes'), where('userId', '==', usuarioAtual.uid)));
+      const idsPresentes = new Set(documentosHistorico.map((item) => `${item.origemColecao}:${item.id}`));
+      reaudicoesLegadas = [];
+      legados.docs.forEach((docSnap) => {
+        if (idsPresentes.has(`historico:${docSnap.id}`)) return;
+        const registro = normalizarDocumentoReaudicao(docSnap.id, docSnap.data(), 'reaudicoes');
+        reaudicoesLegadas.push(registro);
+        documentosHistorico.push({ id: registro.id, data: registro, origemColecao: 'legado' });
+      });
+      const atuais = reaudicoesLista.filter((item) => item.colecaoDados !== 'reaudicoes');
+      reaudicoesLista = [...atuais, ...reaudicoesLegadas];
+      renderizarReaudicoes();
+    } catch (erro) {
+      console.info('Coleção legada reaudicoes indisponível; mantendo as coleções atuais.');
+    }
 
     todosOsAlbuns = [];
-    snapshot.forEach(docSnap => {
-      todosOsAlbuns.push({ id: docSnap.id, ...docSnap.data() });
+    snapshot.docs.forEach((docSnap) => {
+      const album = { id: docSnap.id, ...docSnap.data() };
+      if (registroVeioDoCaderno(album)) todosOsAlbuns.push(...criarCardCaderno(album, album.id));
+      else if (!album.isReaudicao && !album.integradoAlbumPrincipal) todosOsAlbuns.push(album);
     });
+
+    documentosHistorico.forEach(({ id, data: registro }) => {
+      if (registroVeioDoCaderno(registro)) {
+        todosOsAlbuns.push(...criarCardCaderno(registro, id));
+        return;
+      }
+      const nome = registro.nomeAlbum || registro.album || registro.nome || registro.titulo;
+      const media = Number.parseFloat(registro.notaAtual ?? registro.media ?? registro.nota);
+      if (!nome || !Number.isFinite(media)) return;
+      todosOsAlbuns.push({
+        ...registro,
+        id: `reaudicao-${id}`,
+        historicoId: id,
+        nome,
+        banda: registro.nomeBanda || registro.banda || registro.artista || '',
+        imagem: registro.imagem || registro.capa || '',
+        media,
+        notaAtual: media,
+        nmp: Number(registro.nmp || media * 10),
+        isReaudicao: true,
+        criadoEm: converterDataReaudicao(registro.dataReouvido || registro.criadoEm),
+        atualizadoEm: converterDataReaudicao(registro.atualizadoEm || registro.dataReouvido)
+      });
+    });
+
+    const totalSegundosEscuta = todosOsAlbuns.reduce((total, album) => total + Math.max(0, Number(album.duracaoSegundos || 0)), 0);
+    const totalEscutas = todosOsAlbuns.length;
+    document.getElementById('dashboard-total-registros').textContent = `${totalEscutas} registros`;
+    document.getElementById('dashboard-tempo-total').textContent = formatarDuracao(totalSegundosEscuta);
 
     paginaAtual = 1;
     aplicarFiltrosEBuscar();
@@ -1776,7 +2973,7 @@ window.aplicarFiltrosEBuscar = function() {
   const ordem = document.getElementById('filtro-ordem').value;
 
   albunsFiltrados = todosOsAlbuns.filter(album => {
-    const bateNome = album.nome.toLowerCase().includes(termo);
+    const bateNome = (album.nome || '').toLowerCase().includes(termo);
     const bateBanda = (album.banda || '').toLowerCase().includes(termo);
     const bateAno = anoFiltro ? album.ano == anoFiltro : true;
     return (bateNome || bateBanda) && bateAno;
@@ -1811,35 +3008,45 @@ function renderizarPagina() {
   const inicio = (paginaAtual - 1) * ITENS_POR_PAGINA;
   const fim = inicio + ITENS_POR_PAGINA;
   const albunsExibidos = albunsFiltrados.slice(inicio, fim);
+  const notasDashboard = todosOsAlbuns.map((album) => Number.parseFloat(album.media)).filter(Number.isFinite);
+  const menorNotaDashboard = notasDashboard.length ? Math.min(...notasDashboard) : 0;
+  const maiorNotaDashboard = notasDashboard.length ? Math.max(...notasDashboard) : 10;
 
   albunsExibidos.forEach(data => {
-    const dataCriacao = data.criadoEm ? new Date(data.criadoEm).toLocaleDateString('pt-BR') : 'N/A';
-    const dataEdicao = data.atualizadoEm ? new Date(data.atualizadoEm).toLocaleDateString('pt-BR') : 'N/A';
+    const dataCriacao = data.criadoEm ? formatarDataReaudicao(data.criadoEm) : 'N/A';
+    const dataEdicao = data.atualizadoEm ? formatarDataReaudicao(data.atualizadoEm) : 'N/A';
 
     const temObs = data.obs && data.obs.trim().length > 0;
     const duracaoAlbum = String(data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '')).trim();
 
     const card = document.createElement('div');
-    card.className = 'card-album';
+    const notaBaselineCard = Number(data.notaAntiga ?? data.notaOriginal ?? data.notaCaderno ?? data.media ?? 0);
+    const notaAtualCard = Number(data.notaAtual ?? data.media ?? 0);
+    card.className = 'card-album nota-gradiente';
+    card.style.setProperty('--nota-cor', calcularCorPorNota(data.media, menorNotaDashboard, maiorNotaDashboard));
     card.innerHTML = `
       <div class="card-cabecalho">
         <div class="badges-notas">
-          <span class="nota-badge">${data.media}</span>
+          <span class="nota-badge">${Number(data.media || 0).toFixed(1)}</span>
           <span class="badge-nmp">${data.nmp || 0}% NMP</span>
+          ${data.isReaudicao ? '<span class="badge-reaudicao">Ré-audição 🔄</span>' : data.isCaderno ? '<span class="badge-reaudicao badge-caderno">Caderno 📓</span>' : ''}
         </div>
       </div>
-      <h3>${data.nome} (${data.ano})</h3>
-      <p class="album-artist">${data.banda || 'Banda não informada'}</p>
+      <h3>${escaparHtml(data.nome || 'Álbum sem nome')} (${escaparHtml(data.ano || '—')})</h3>
+      <p class="album-artist">${escaparHtml(data.banda || 'Banda não informada')}</p>
 
-      ${data.imagem ? `<img src="${data.imagem}" alt="Capa" onerror="this.src='https://via.placeholder.com/200?text=Sem+Capa'">` : ''}
+      ${data.imagem ? `<img src="${escaparHtml(data.imagem)}" alt="Capa" onerror="this.src='https://via.placeholder.com/200?text=Sem+Capa'">` : ''}
+
+      ${data.isCaderno ? `<p class="reaudicao-card-comparativo">Nota Caderno: ${notaBaselineCard.toFixed(1)} · 1ª escuta: ${formatarDataReaudicao(data.dataOriginal)}${data.cadernoPareado ? ` → Ré-audição: ${notaAtualCard.toFixed(1)} · ${formatarDataReaudicao(data.dataReouvido)}` : ''}</p>` : ''}
+      ${data.isReaudicao && data.notaOriginal !== null && data.notaOriginal !== undefined ? `<p class="reaudicao-card-comparativo">${data.origem === 'caderno_antigo' ? 'Nota Caderno' : 'Nota original'}: ${Number(data.notaOriginal).toFixed(1)} → Nova Nota: ${Number(data.media || 0).toFixed(1)} (${Number(data.media || 0) - Number(data.notaOriginal) > 0 ? '+' : ''}${(Number(data.media || 0) - Number(data.notaOriginal)).toFixed(1)})${data.origem === 'caderno_antigo' ? ` · 1ª escuta: ${formatarDataReaudicao(data.dataOriginal)} · Reouvido: ${formatarDataReaudicao(data.dataReouvido)}` : ''}</p>` : data.isReaudicao ? '<p class="reaudicao-card-comparativo">Primeira avaliação registrada no histórico</p>' : ''}
 
       <p><strong>Soma das Notas:</strong> ${data.somaNotas ?? 'N/A'}</p>
-      <p><strong>Música favorita:</strong> ${data.favorita || 'N/A'}</p>
-      <p><strong>Faixas:</strong> ${data.faixas.length}</p>
+      <p><strong>Música favorita:</strong> ${escaparHtml(data.favorita || 'N/A')}</p>
+      <p><strong>Faixas:</strong> ${Array.isArray(data.faixas) ? data.faixas.length : 0}</p>
       ${duracaoAlbum ? `<p><strong>Duração:</strong> ${escaparHtml(duracaoAlbum)}</p>` : ''}
-      <p><strong>Idade no cadastro:</strong> ${data.idadeNoCadastro ?? 'N/A'} anos</p>
+      ${!data.isReaudicao && !data.isCaderno ? `<p><strong>Idade no cadastro:</strong> ${data.idadeNoCadastro ?? 'N/A'} anos</p>` : ''}
 
-      ${temObs ? `<button type="button" class="btn-obs" data-album-obs="${data.id}">Ver observações</button>` : ''}
+      ${temObs && !data.isReaudicao ? `<button type="button" class="btn-obs" data-album-obs="${data.id}">Ver observações</button>` : ''}
 
       <div class="card-datas">
         Cadastrado: ${dataCriacao}<br>
@@ -1847,8 +3054,7 @@ function renderizarPagina() {
       </div>
 
       <div class="card-acoes">
-        <button onclick="editarAlbum('${data.id}')" class="btn-alerta">Editar</button>
-        <button onclick="deletarAlbum('${data.id}')" class="btn-perigo">Excluir</button>
+        ${data.isCaderno ? `<button type="button" class="btn-alerta" data-dashboard-caderno-editar="${escaparHtml(data.historicoId)}">Editar</button><button type="button" class="btn-perigo" data-dashboard-caderno-excluir="${escaparHtml(data.historicoId)}">Excluir</button>` : data.isReaudicao ? `<button type="button" class="btn-alerta" data-dashboard-reaudicao-editar="${escaparHtml(data.historicoId)}">Editar</button><button type="button" class="btn-perigo" data-dashboard-reaudicao-excluir="${escaparHtml(data.historicoId)}">Excluir</button>` : `<button onclick="editarAlbum('${data.id}')" class="btn-alerta">Editar</button><button onclick="deletarAlbum('${data.id}')" class="btn-perigo">Excluir</button>`}
       </div>
     `;
     grid.appendChild(card);
@@ -1860,6 +3066,22 @@ function renderizarPagina() {
 }
 
 document.getElementById('lista-albuns')?.addEventListener('click', async (event) => {
+  const editarCaderno = event.target.closest('[data-dashboard-caderno-editar]');
+  const excluirCaderno = event.target.closest('[data-dashboard-caderno-excluir]');
+  const editarReaudicao = event.target.closest('[data-dashboard-reaudicao-editar]');
+  const excluirReaudicao = event.target.closest('[data-dashboard-reaudicao-excluir]');
+  const origemComparacoes = document.getElementById('lista-reaudicoes');
+  if (editarCaderno || excluirCaderno || editarReaudicao || excluirReaudicao) {
+    const [atributo, id] = editarCaderno
+      ? ['data-caderno-editar', editarCaderno.dataset.dashboardCadernoEditar]
+      : excluirCaderno
+        ? ['data-caderno-excluir', excluirCaderno.dataset.dashboardCadernoExcluir]
+        : editarReaudicao
+          ? ['data-reaudicao-editar', editarReaudicao.dataset.dashboardReaudicaoEditar]
+          : ['data-reaudicao-excluir', excluirReaudicao.dataset.dashboardReaudicaoExcluir];
+    origemComparacoes?.querySelector(`[${atributo}="${CSS.escape(id)}"]`)?.click();
+    return;
+  }
   const botao = event.target.closest('[data-album-obs]');
   if (!botao) return;
   const album = await getDoc(doc(db, 'albuns', botao.dataset.albumObs));
@@ -1884,7 +3106,7 @@ window.editarAlbum = async function(id) {
     document.getElementById('album-ano').value = data.ano;
     document.getElementById('album-favorita').value = data.favorita || '';
     document.getElementById('album-obs').value = data.obs || '';
-    definirTimerAudicao(data.duracaoSegundos || 0);
+    definirTimerAudicao(data.duracaoSegundos || 0, id);
     document.getElementById('album-duracao').value = data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '');
 
     if (data.imagem) {
@@ -1934,6 +3156,7 @@ async function carregarBandas() {
 
     snapshot.forEach((docSnap) => {
       const album = { id: docSnap.id, ...docSnap.data() };
+      if (album.isReaudicao || album.integradoAlbumPrincipal) return;
       const nomeBanda = (album.banda || 'Banda não informada').trim();
       if (!grupos.has(nomeBanda)) grupos.set(nomeBanda, []);
       grupos.get(nomeBanda).push(album);
@@ -2021,6 +3244,30 @@ function lerArquivoComoDataUrl(input) {
     const leitor = new FileReader();
     leitor.onload = () => resolve(leitor.result);
     leitor.onerror = reject;
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+function lerCapaCadernoCompactada(input) {
+  const arquivo = input?.files?.[0];
+  if (!arquivo) return Promise.resolve('');
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onerror = () => reject(leitor.error || new Error('Não foi possível ler o arquivo da capa.'));
+    leitor.onload = () => {
+      const imagem = new Image();
+      imagem.onerror = () => reject(new Error('O arquivo selecionado não é uma imagem válida.'));
+      imagem.onload = () => {
+        const maxLado = 700;
+        const escala = Math.min(1, maxLado / Math.max(imagem.width, imagem.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(imagem.width * escala));
+        canvas.height = Math.max(1, Math.round(imagem.height * escala));
+        canvas.getContext('2d').drawImage(imagem, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.76));
+      };
+      imagem.src = leitor.result;
+    };
     leitor.readAsDataURL(arquivo);
   });
 }
@@ -2302,13 +3549,132 @@ function atualizarMetricasAudicao(albuns) {
   if (elementos.correlacao) elementos.correlacao.textContent = `${leitura} (r = ${correlacao.toFixed(2)})`;
 }
 
+function renderizarGraficoAtividade(registros) {
+  const canvas = document.getElementById('graficoAtividadeEscutas');
+  const agrupamento = document.getElementById('filtro-periodo-atividade')?.value || 'mes';
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (graficoAtividadeEscutas) {
+    graficoAtividadeEscutas.destroy();
+    graficoAtividadeEscutas = null;
+  }
+
+  const mapa = new Map();
+  const nomesDias = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  registros.forEach((registro) => {
+    const data = converterDataReaudicao(registro.dataReouvido || registro.dataOriginal || registro.criadoEm);
+    if (!data) return;
+    let chave;
+    if (agrupamento === 'semana') chave = nomesDias[data.getDay()];
+    else if (agrupamento === 'ano') chave = String(data.getFullYear());
+    else if (agrupamento === 'trimestre') chave = `${data.getFullYear()} T${Math.floor(data.getMonth() / 3) + 1}`;
+    else chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+    mapa.set(chave, (mapa.get(chave) || 0) + 1);
+  });
+
+  let labels = [...mapa.keys()];
+  if (agrupamento === 'semana') {
+    labels = nomesDias.filter((dia) => mapa.has(dia));
+  } else {
+    labels.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+  }
+  graficoAtividadeEscutas = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: labels.length ? labels : ['Sem atividade'],
+      datasets: [{
+        label: 'Escutas',
+        data: labels.length ? labels.map((label) => mapa.get(label)) : [0],
+        backgroundColor: 'rgba(52, 211, 153, 0.72)',
+        borderColor: '#34d399',
+        borderWidth: 1,
+        borderRadius: 5
+      }]
+    },
+    options: {
+      responsive: true,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#cbd5e1', autoSkip: true, maxRotation: 0 }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: '#cbd5e1', precision: 0 }, grid: { color: 'rgba(255,255,255,0.08)' } }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+function filtrarRegistrosPorOrigem(registros, origem) {
+  if (origem === 'ineditos') return registros.filter((item) => !item.isReaudicao && !item.isCaderno);
+  if (origem === 'caderno') return registros.filter((item) => item.isCaderno);
+  if (origem === 'reaudicoes') return registros.filter((item) => item.isReaudicao);
+  return registros;
+}
+
+document.getElementById('filtro-tipo-estatistica').addEventListener('change', carregarEstatisticas);
+document.getElementById('filtro-periodo-atividade').addEventListener('change', () => {
+  const tipo = document.getElementById('filtro-tipo-estatistica').value;
+  renderizarGraficoAtividade(filtrarRegistrosPorOrigem(registrosEstatisticas, tipo));
+});
+
 // ESTATÍSTICAS
 async function carregarEstatisticas() {
-  const q = query(collection(db, "albuns"), where("userId", "==", usuarioAtual.uid));
-  const snapshot = await getDocs(q);
-
-  let albuns = [];
-  snapshot.forEach(docSnap => albuns.push(docSnap.data()));
+  const [albunsSnapshot, historicoSnapshot] = await Promise.all([
+    getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid))),
+    getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)))
+  ]);
+  const albunsIneditos = albunsSnapshot.docs
+    .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+    .filter((album) => !album.isReaudicao && !album.integradoAlbumPrincipal)
+    .map((album) => ({ ...album, isReaudicao: false, isCaderno: false }));
+  const historico = historicoSnapshot.docs.flatMap((docSnap) => {
+    const dado = docSnap.data();
+    const ehCaderno = dado.origem === 'caderno_antigo';
+    const nomeAlbum = dado.nomeCaderno || dado.nomeAlbum || dado.album || dado.nome || 'Álbum sem nome';
+    const nomeBanda = dado.bandaCaderno || dado.nomeBanda || dado.banda || 'Artista não informado';
+    const notaAntiga = Number.parseFloat(dado.notaAntiga ?? dado.notaOriginal ?? dado.notaCaderno ?? dado.mediaAntiga);
+    const registros = [];
+    if (ehCaderno && Number.isFinite(notaAntiga)) {
+      registros.push({
+        id: `${docSnap.id}-caderno`,
+        ...dado,
+        nome: nomeAlbum,
+        banda: nomeBanda,
+        media: notaAntiga,
+        criadoEm: converterDataReaudicao(dado.dataOriginal || dado.dataReouvido || dado.criadoEm),
+        isReaudicao: false,
+        isCaderno: true
+      });
+    }
+    const notaAtual = Number.parseFloat(dado.notaAtual ?? dado.media ?? dado.nota);
+    if (dado.integradoAlbumPrincipal && Number.isFinite(notaAtual)) {
+      registros.push({
+        id: `${docSnap.id}-reaudicao`,
+        ...dado,
+        nome: nomeAlbum,
+        banda: nomeBanda,
+        media: notaAtual,
+        criadoEm: converterDataReaudicao(dado.dataReouvido || dado.criadoEm),
+        isReaudicao: true,
+        isCaderno: false
+      });
+    } else if (!ehCaderno && Number.isFinite(notaAtual)) {
+      registros.push({
+        id: docSnap.id,
+        ...dado,
+        nome: nomeAlbum,
+        banda: nomeBanda,
+        media: notaAtual,
+        criadoEm: converterDataReaudicao(dado.dataReouvido || dado.criadoEm),
+        isReaudicao: true,
+        isCaderno: false
+      });
+    }
+    return registros;
+  });
+  registrosEstatisticas = [...albunsIneditos, ...historico];
+  const filtro = document.getElementById('filtro-tipo-estatistica').value;
+  const albuns = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro);
+  renderizarGraficoAtividade(albuns);
 
   document.getElementById('stat-total').innerText = albuns.length;
 
@@ -2326,7 +3692,17 @@ async function carregarEstatisticas() {
     document.getElementById('stat-album-extenso').innerText = '-';
     document.getElementById('stat-album-enxuto').innerText = '-';
     document.getElementById('stat-total-faixas').innerText = '0';
+    document.getElementById('stat-tendencia').innerText = '-';
+    document.getElementById('stat-mes-produtivo').innerText = '-';
+    document.getElementById('stat-album-longo').innerText = '-';
+    document.getElementById('stat-album-curto').innerText = '-';
+    document.getElementById('stat-correlacao-duracao').innerText = '-';
     atualizarMetricasAudicao([]);
+    [window.graficoBandasChart, window.graficoDispersaoBandasChart, window.graficoDecadasChart, window.meuGrafico].forEach((chart) => chart?.destroy());
+    window.graficoBandasChart = null;
+    window.graficoDispersaoBandasChart = null;
+    window.graficoDecadasChart = null;
+    window.meuGrafico = null;
     return;
   }
 
