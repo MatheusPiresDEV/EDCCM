@@ -3151,12 +3151,18 @@ async function carregarBandas() {
   container.innerHTML = '<p class="empty-state">Carregando discografias...</p>';
 
   try {
-    const snapshot = await getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid)));
+    const [snapshot, historicoSnapshot] = await Promise.all([
+      getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid))),
+      getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)))
+    ]);
     const grupos = new Map();
 
-    snapshot.forEach((docSnap) => {
-      const album = { id: docSnap.id, ...docSnap.data() };
-      if (album.isReaudicao || album.integradoAlbumPrincipal) return;
+    const albuns = snapshot.docs
+      .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+      .filter((album) => !album.isReaudicao && !album.integradoAlbumPrincipal)
+      .map((album) => ({ ...album, isReaudicao: false, isCaderno: false, origemRegistro: 'Inédito' }));
+    const historico = historicoSnapshot.docs.flatMap((docSnap) => criarRegistrosHistoricoEstatisticas(docSnap.id, docSnap.data()));
+    selecionarRegistrosUnicosPorAlbum([...albuns, ...historico]).forEach((album) => {
       const nomeBanda = (album.banda || 'Banda não informada').trim();
       if (!grupos.has(nomeBanda)) grupos.set(nomeBanda, []);
       grupos.get(nomeBanda).push(album);
@@ -3188,7 +3194,7 @@ async function carregarBandas() {
             return `
               <div class="barra-album">
                 <div class="barra-album-meta">
-                  <span title="${escaparHtml(album.nome || 'Álbum sem nome')}">${escaparHtml(album.nome || 'Álbum sem nome')} - ${escaparHtml(album.ano || 'N/A')}</span>
+                  <span title="${escaparHtml(album.nome || 'Álbum sem nome')}">${escaparHtml(album.nome || 'Álbum sem nome')} - ${escaparHtml(album.ano || 'N/A')} · ${escaparHtml(album.origemRegistro || 'Inédito')}</span>
                   <strong>${nota.toFixed(1)}</strong>
                 </div>
                 <div class="barra-album-trilho"><span style="width: ${nota * 10}%"></span></div>
@@ -3604,9 +3610,67 @@ function renderizarGraficoAtividade(registros) {
 }
 
 function filtrarRegistrosPorOrigem(registros, origem) {
-  if (origem === 'ineditos') return registros.filter((item) => !item.isReaudicao && !item.isCaderno);
-  if (origem === 'caderno') return registros.filter((item) => item.isCaderno);
-  if (origem === 'reaudicoes') return registros.filter((item) => item.isReaudicao);
+  let filtrados = registros;
+  if (origem === 'ineditos') filtrados = registros.filter((item) => !item.isReaudicao && !item.isCaderno);
+  if (origem === 'caderno') filtrados = registros.filter((item) => item.isCaderno);
+  if (origem === 'reaudicoes') filtrados = registros.filter((item) => item.isReaudicao);
+  return selecionarRegistrosUnicosPorAlbum(filtrados);
+}
+
+function selecionarRegistrosUnicosPorAlbum(registros) {
+  const unicos = new Map();
+  const prioridade = (registro) => registro.isReaudicao ? 2 : registro.isCaderno ? 1 : 0;
+  const dataDoRegistro = (registro) => converterDataReaudicao(registro.dataReouvido || registro.criadoEm || registro.atualizadoEm)?.getTime() || 0;
+
+  registros.forEach((registro) => {
+    const temIdentidade = normalizarTexto(registro.banda) && normalizarTexto(registro.nome);
+    const chaveFinal = temIdentidade
+      ? criarChaveAlbum(registro.banda, registro.nome)
+      : `registro_${registro.id}`;
+    const existente = unicos.get(chaveFinal);
+    if (!existente || prioridade(registro) > prioridade(existente) ||
+      (prioridade(registro) === prioridade(existente) && dataDoRegistro(registro) > dataDoRegistro(existente))) {
+      unicos.set(chaveFinal, registro);
+    }
+  });
+  return [...unicos.values()];
+}
+
+function criarRegistrosHistoricoEstatisticas(id, dado) {
+  const ehCaderno = registroVeioDoCaderno(dado);
+  const nomeAlbum = dado.nomeCaderno || dado.nomeAlbum || dado.album || dado.nome || 'Álbum sem nome';
+  const nomeBanda = dado.bandaCaderno || dado.nomeBanda || dado.banda || 'Artista não informado';
+  const notaAntiga = Number.parseFloat(dado.notaAntiga ?? dado.notaOriginal ?? dado.notaCaderno ?? dado.mediaAntiga);
+  const registros = [];
+
+  if (ehCaderno && Number.isFinite(notaAntiga)) {
+    registros.push({
+      id: `${id}-caderno`,
+      ...dado,
+      nome: nomeAlbum,
+      banda: nomeBanda,
+      media: notaAntiga,
+      criadoEm: converterDataReaudicao(dado.dataOriginal || dado.dataReouvido || dado.criadoEm),
+      isReaudicao: false,
+      isCaderno: true,
+      origemRegistro: 'Caderno antigo'
+    });
+  }
+
+  const notaAtual = Number.parseFloat(dado.notaAtual ?? dado.media ?? dado.nota);
+  if ((!ehCaderno || dado.integradoAlbumPrincipal) && Number.isFinite(notaAtual)) {
+    registros.push({
+      id: `${id}-reaudicao`,
+      ...dado,
+      nome: nomeAlbum,
+      banda: nomeBanda,
+      media: notaAtual,
+      criadoEm: converterDataReaudicao(dado.dataReouvido || dado.criadoEm),
+      isReaudicao: true,
+      isCaderno: false,
+      origemRegistro: 'Ré-audição'
+    });
+  }
   return registros;
 }
 
@@ -3625,52 +3689,8 @@ async function carregarEstatisticas() {
   const albunsIneditos = albunsSnapshot.docs
     .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
     .filter((album) => !album.isReaudicao && !album.integradoAlbumPrincipal)
-    .map((album) => ({ ...album, isReaudicao: false, isCaderno: false }));
-  const historico = historicoSnapshot.docs.flatMap((docSnap) => {
-    const dado = docSnap.data();
-    const ehCaderno = dado.origem === 'caderno_antigo';
-    const nomeAlbum = dado.nomeCaderno || dado.nomeAlbum || dado.album || dado.nome || 'Álbum sem nome';
-    const nomeBanda = dado.bandaCaderno || dado.nomeBanda || dado.banda || 'Artista não informado';
-    const notaAntiga = Number.parseFloat(dado.notaAntiga ?? dado.notaOriginal ?? dado.notaCaderno ?? dado.mediaAntiga);
-    const registros = [];
-    if (ehCaderno && Number.isFinite(notaAntiga)) {
-      registros.push({
-        id: `${docSnap.id}-caderno`,
-        ...dado,
-        nome: nomeAlbum,
-        banda: nomeBanda,
-        media: notaAntiga,
-        criadoEm: converterDataReaudicao(dado.dataOriginal || dado.dataReouvido || dado.criadoEm),
-        isReaudicao: false,
-        isCaderno: true
-      });
-    }
-    const notaAtual = Number.parseFloat(dado.notaAtual ?? dado.media ?? dado.nota);
-    if (dado.integradoAlbumPrincipal && Number.isFinite(notaAtual)) {
-      registros.push({
-        id: `${docSnap.id}-reaudicao`,
-        ...dado,
-        nome: nomeAlbum,
-        banda: nomeBanda,
-        media: notaAtual,
-        criadoEm: converterDataReaudicao(dado.dataReouvido || dado.criadoEm),
-        isReaudicao: true,
-        isCaderno: false
-      });
-    } else if (!ehCaderno && Number.isFinite(notaAtual)) {
-      registros.push({
-        id: docSnap.id,
-        ...dado,
-        nome: nomeAlbum,
-        banda: nomeBanda,
-        media: notaAtual,
-        criadoEm: converterDataReaudicao(dado.dataReouvido || dado.criadoEm),
-        isReaudicao: true,
-        isCaderno: false
-      });
-    }
-    return registros;
-  });
+    .map((album) => ({ ...album, isReaudicao: false, isCaderno: false, origemRegistro: 'Inédito' }));
+  const historico = historicoSnapshot.docs.flatMap((docSnap) => criarRegistrosHistoricoEstatisticas(docSnap.id, docSnap.data()));
   registrosEstatisticas = [...albunsIneditos, ...historico];
   const filtro = document.getElementById('filtro-tipo-estatistica').value;
   const albuns = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro);
