@@ -199,7 +199,8 @@
 
                         <div class="grupo-campo">
                             <label for="album-banda">Banda / Artista *</label>
-                            <input type="text" id="album-banda" placeholder="Ex: Metallica" required>
+                            <input type="text" id="album-banda" list="lista-bandas-autocomplete" placeholder="Ex: Metallica" autocomplete="off" required>
+                            <datalist id="lista-bandas-autocomplete"></datalist>
                         </div>
                     </div>
 
@@ -256,6 +257,7 @@
                     <div class="secao-faixas">
                         <div class="faixas-header">
                             <h3>🎵 Lista de Faixas e Notas</h3>
+                            <strong id="nota-parcial-album" class="nota-parcial">Nota parcial: 0,0</strong>
                             <button type="button" id="btn-add-faixa" class="btn-secundario btn-sm">
                                 Adicionar Faixa
                             </button>
@@ -354,12 +356,63 @@
                     <textarea id="viagem-tarefas" rows="3" placeholder="Ride; Master; Sanitarium"></textarea>
                 </div>
 
+                <label class="opcao-inline"><input type="checkbox" id="viagem-recorrente"> Tarefa recorrente</label>
+                <div id="config-recorrencia" class="config-recorrencia escondido">
+                    <div class="grid-form-2col">
+                        <div class="grupo-campo">
+                            <label for="viagem-frequencia">Frequência</label>
+                            <select id="viagem-frequencia">
+                                <option value="diaria">Diária</option>
+                                <option value="dias-semana">Dias da semana</option>
+                                <option value="semanal">Semanal</option>
+                                <option value="mensal">Mensal</option>
+                                <option value="intervalo">Intervalo personalizado</option>
+                            </select>
+                        </div>
+                        <div class="grupo-campo">
+                            <label for="viagem-hora-limite">Horário da tarefa</label>
+                            <input type="time" id="viagem-hora-limite">
+                        </div>
+                    </div>
+                    <fieldset id="viagem-dias-semana" class="dias-semana escondido">
+                        <legend>Dias de execução</legend>
+                        <label><input type="checkbox" value="1"> Seg</label>
+                        <label><input type="checkbox" value="2"> Ter</label>
+                        <label><input type="checkbox" value="3"> Qua</label>
+                        <label><input type="checkbox" value="4"> Qui</label>
+                        <label><input type="checkbox" value="5"> Sex</label>
+                        <label><input type="checkbox" value="6"> Sáb</label>
+                        <label><input type="checkbox" value="0"> Dom</label>
+                    </fieldset>
+                    <div id="grupo-intervalo-dias" class="grupo-campo escondido">
+                        <label for="viagem-intervalo-dias">Repetir a cada</label>
+                        <div class="intervalo-recorrencia-controles">
+                            <input type="number" id="viagem-intervalo-dias" min="1" step="1" value="1">
+                            <select id="viagem-intervalo-unidade" aria-label="Unidade do intervalo">
+                                <option value="minutos">minutos</option>
+                                <option value="horas">horas</option>
+                                <option value="dias">dias</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="grupo-dia-mes" class="grupo-campo escondido">
+                        <label for="viagem-dia-mes">Dia do mês</label>
+                        <input type="number" id="viagem-dia-mes" min="1" max="31" step="1" value="21">
+                    </div>
+                </div>
+                <label class="opcao-inline"><input type="checkbox" id="viagem-fixada"> Fixar no topo</label>
+
                 <div class="form-acoes">
                     <button type="submit" class="btn-sucesso">Salvar Ação</button>
                     <button type="button" id="btn-cancelar-viagem" class="btn-secundario">Cancelar</button>
                 </div>
             </form>
 
+            <div class="secao-cabecalho tarefas-recorrentes-cabecalho">
+                <h3>Tarefas Recorrentes</h3>
+                <button type="button" id="btn-ativar-notificacoes" class="btn-secundario btn-sm" title="Ativar alertas de prazo">Ativar alertas</button>
+            </div>
+            <div id="lista-tarefas-recorrentes" class="cards-grid"></div>
             <div id="lista-viagens" class="cards-grid"></div>
         </section>
 
@@ -592,9 +645,21 @@
                 <div class="card">
                     <div class="card-icon">🎤</div>
                     <div class="card-info">
-                        <h3>Banda Favorita</h3>
+                        <h3>Banda Favorita (maior média)</h3>
                         <p id="stat-banda-top">-</p>
                     </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🔊</div>
+                    <div class="card-info"><h3>Banda Mais Ouvida</h3><p id="stat-banda-mais-ouvida">-</p></div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🔁</div>
+                    <div class="card-info"><h3>Banda com Mais Ré-audições</h3><p id="stat-banda-reaudicoes">-</p></div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">⭐</div>
+                    <div class="card-info"><h3>Faixa Favorita Mais Escolhida</h3><p id="stat-faixa-favorita">-</p></div>
                 </div>
                 <div class="card">
                     <div class="card-icon">�</div>
@@ -711,6 +776,18 @@
             </div>
 
             <div class="grid-graficos">
+                <div class="container-grafico">
+                    <h3>Evolução por Banda (Ano x Nota)</h3>
+                    <div class="canvas-wrapper"><canvas id="graficoEvolucaoBandas"></canvas></div>
+                </div>
+                <div class="container-grafico">
+                    <h3>Nota Média por Dia</h3>
+                    <div class="canvas-wrapper"><canvas id="graficoDispersaoNotasDia"></canvas></div>
+                </div>
+                <div class="container-grafico ranking-albuns-secao">
+                    <h3>Ranking dos Melhores Álbuns</h3>
+                    <ol id="ranking-albuns" class="ranking-albuns"></ol>
+                </div>
                 <div class="container-grafico atividade-grafico">
                     <div class="atividade-grafico-cabecalho">
                         <h3>Atividade de Escutas</h3>
@@ -802,7 +879,7 @@
 
                     <div class="grupo-campo">
                         <label for="admin-user-senha">Senha</label>
-                        <input type="text" id="admin-user-senha" placeholder="Nova senha" required>
+                        <input type="password" id="admin-user-senha" placeholder="Obrigatória para nova conta; deixe vazia ao editar" autocomplete="new-password">
                     </div>
 
                     <div class="grupo-campo">
@@ -909,6 +986,16 @@
                 <div class="grupo-campo"><label for="comparar-reaudicao-b">Segunda audição</label><select id="comparar-reaudicao-b"></select></div>
             </div>
             <div id="comparador-resultado" class="comparador-resultado"></div>
+        </div>
+    </div>
+
+    <div id="modal-historico-top5" class="modal-overlay escondido" role="dialog" aria-modal="true" aria-labelledby="modal-historico-top5-titulo">
+        <div class="modal-conteudo modal-lg">
+            <div class="modal-cabecalho">
+                <h3 id="modal-historico-top5-titulo">Histórico de mudanças</h3>
+                <button type="button" class="btn-fechar" data-fechar-modal="modal-historico-top5" aria-label="Fechar">×</button>
+            </div>
+            <div id="conteudo-historico-top5" class="modal-corpo historico-top5"></div>
         </div>
     </div>
 

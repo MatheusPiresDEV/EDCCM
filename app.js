@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import {
-  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, updateEmail, updatePassword
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, updateEmail
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
   getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot
@@ -462,6 +462,8 @@ let paginaAtual = 1;
 let top5ListaCompleta = [];
 let top5Unsubscribe = null;
 let viagensUnsubscribe = null;
+let tarefasListaAtual = [];
+let chaveDiaTarefasRenderizadas = '';
 let observacoesUnsubscribe = null;
 let reaudicoesUnsubscribe = null;
 let reaudicoesLista = [];
@@ -474,6 +476,8 @@ let reaudicaoEditandoId = null;
 let reaudicaoEvolucaoChart = null;
 let reaudicaoComparacaoChart = null;
 let graficoAtividadeEscutas = null;
+let graficoEvolucaoBandas = null;
+let graficoNotasDia = null;
 let registrosEstatisticas = [];
 let timerAudicaoSegundos = 0;
 let timerAudicaoIntervalo = null;
@@ -719,6 +723,7 @@ async function editarUsuarioAdmin(idUsuario) {
     if (inputId) inputId.value = usuario.id;
     if (inputEmail) inputEmail.value = usuario.email || '';
     if (inputSenha) inputSenha.value = '';
+    if (inputSenha) inputSenha.placeholder = 'Vazia mantém a senha atual';
     if (inputRole) inputRole.value = String(usuario.role || 'user');
 
     window.navegarPara('sec-admin');
@@ -769,12 +774,13 @@ async function salvarUsuarioAdmin(event) {
   const senha = inputSenha.value.trim();
   const role = inputRole.value;
 
-  if (!email || !senha) {
-    mostrarToast('Preencha e-mail e senha antes de salvar.', 'erro');
+  const idUsuario = inputId ? inputId.value : '';
+  if (inputSenha) inputSenha.placeholder = idUsuario ? 'Vazia mantém a senha atual' : 'Obrigatória para nova conta';
+
+  if (!email || (!idUsuario && !senha)) {
+    mostrarToast('Informe e-mail e senha para criar uma conta.', 'erro');
     return;
   }
-
-  const idUsuario = inputId ? inputId.value : '';
 
   if (idUsuario) {
     try {
@@ -790,17 +796,14 @@ async function salvarUsuarioAdmin(event) {
         if (userAtual && userAtual.email !== email) {
           await updateEmail(userAtual, email);
         }
-        if (userAtual && senha) {
-          await updatePassword(userAtual, senha);
-        }
       } else {
-        mostrarToast('Perfil atualizado. Para trocar senha/e-mail de outra conta, use um backend admin.', 'erro');
+        mostrarToast('Perfil atualizado no painel. A senha não foi alterada.', 'sucesso');
       }
 
-      mostrarToast('Usuário atualizado com sucesso.');
+      if (usuarioAtual && idUsuario === usuarioAtual.uid) mostrarToast('Usuário atualizado. A senha não foi alterada.');
     } catch (error) {
       console.error('Erro ao atualizar usuário:', error);
-      mostrarToast('Não foi possível atualizar este usuário.', 'erro');
+      mostrarToast('Não foi possível atualizar este usuário. A senha não foi alterada.', 'erro');
     }
   } else {
     try {
@@ -822,6 +825,7 @@ async function salvarUsuarioAdmin(event) {
 
   document.getElementById('form-admin-usuario')?.reset();
   document.getElementById('admin-user-id').value = '';
+  document.getElementById('admin-user-senha').placeholder = 'Obrigatória para nova conta';
   await carregarUsuariosAdmin();
   await carregarEstatisticasAdmin();
 }
@@ -996,6 +1000,7 @@ if (btnLimparAdminUsuario) {
     if (formAdmin) formAdmin.reset();
     const inputId = document.getElementById('admin-user-id');
     if (inputId) inputId.value = '';
+    document.getElementById('admin-user-senha').placeholder = 'Obrigatória para nova conta';
   });
 }
 
@@ -1021,6 +1026,10 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 
 onAuthStateChanged(auth, async (user) => {
   const lockscreen = document.getElementById('lockscreen');
+  tarefasListaAtual = [];
+  chaveDiaTarefasRenderizadas = '';
+  document.getElementById('lista-tarefas-recorrentes').innerHTML = '';
+  document.getElementById('lista-viagens').innerHTML = '';
 
   if (top5Unsubscribe) top5Unsubscribe();
   if (viagensUnsubscribe) viagensUnsubscribe();
@@ -1173,6 +1182,7 @@ window.aplicarFiltrosTop5 = function() {
           Atualizado: ${formatarDataHora(top.atualizadoEm)}
         </div>
         <div class="card-acoes">
+          <button type="button" class="btn-secundario" data-top5-historico="${top.id}">Histórico</button>
           <button type="button" class="btn-alerta" data-top5-editar="${top.id}">Editar</button>
           <button type="button" class="btn-perigo" data-top5-excluir="${top.id}">Excluir</button>
         </div>
@@ -1202,6 +1212,12 @@ document.getElementById('form-top5').addEventListener('submit', async (e) => {
   const id = document.getElementById('top5-id').value;
   const titulo = document.getElementById('top5-titulo').value.trim();
   const itens = Array.from({ length: 5 }, (_, index) => document.getElementById(`top5-item-${index + 1}`).value.trim());
+  const alteracao = {
+    titulo,
+    itens,
+    alteradoEm: new Date().toISOString(),
+    autor: usuarioAtivo.email || ''
+  };
 
   if (!titulo || itens.some(item => !item)) {
     return mostrarToast('Preencha todos os campos do Top 5!', 'erro');
@@ -1214,6 +1230,11 @@ document.getElementById('form-top5').addEventListener('submit', async (e) => {
       await updateDoc(doc(db, 'viagens', id), {
         titulo,
         itens,
+        historicoTop5: arrayUnion(...(
+          Array.isArray(antigo.historicoTop5) && antigo.historicoTop5.length
+            ? [alteracao]
+            : [{ titulo: antigo.titulo || 'Top 5', itens: antigo.itens || [], alteradoEm: antigo.atualizadoEm || antigo.criadoEm || '', autor: '' }, alteracao]
+        )),
         atualizadoEm: serverTimestamp()
       });
       mostrarToast('Top 5 atualizado!');
@@ -1222,6 +1243,7 @@ document.getElementById('form-top5').addEventListener('submit', async (e) => {
         categoria: 'top5',
         titulo,
         itens,
+        historicoTop5: [alteracao],
         userId: usuarioAtivo.uid,
         realizado: false,
         realizadaEm: null,
@@ -1241,8 +1263,28 @@ document.getElementById('form-top5').addEventListener('submit', async (e) => {
 });
 
 document.getElementById('lista-top5').addEventListener('click', async (event) => {
+  const historicoId = event.target.closest('[data-top5-historico]')?.dataset.top5Historico;
   const editarId = event.target.dataset.top5Editar;
   const excluirId = event.target.dataset.top5Excluir;
+
+  if (historicoId) {
+    const docSnap = await getDoc(doc(db, 'viagens', historicoId));
+    const dados = docSnap.data() || {};
+    const historico = Array.isArray(dados.historicoTop5) && dados.historicoTop5.length
+      ? dados.historicoTop5
+      : [{ titulo: dados.titulo || 'Top 5', itens: dados.itens || [], alteradoEm: dados.atualizadoEm || dados.criadoEm || '', autor: '' }];
+    document.getElementById('modal-historico-top5-titulo').textContent = `Histórico: ${dados.titulo || 'Top 5'}`;
+    document.getElementById('conteudo-historico-top5').innerHTML = [...historico].reverse().map((versao, indice) => `
+      <article class="historico-top5-item">
+        <div><strong>${indice === 0 ? 'Versão atual' : 'Alteração anterior'}</strong><time>${escaparHtml(formatarDataHora(versao.alteradoEm))}</time></div>
+        <h4>${escaparHtml(versao.titulo || 'Top 5')}</h4>
+        <ol>${(versao.itens || []).map((item) => `<li>${escaparHtml(item)}</li>`).join('')}</ol>
+        ${versao.autor ? `<small>${escaparHtml(versao.autor)}</small>` : ''}
+      </article>
+    `).join('');
+    document.getElementById('modal-historico-top5').classList.remove('escondido');
+    return;
+  }
 
   if (editarId) {
     const docSnap = await getDoc(doc(db, 'viagens', editarId));
@@ -1269,6 +1311,215 @@ document.getElementById('lista-top5').addEventListener('click', async (event) =>
 });
 
 // VIAGENS
+function chavePeriodoRecorrencia(recorrencia, data = new Date()) {
+  const dia = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+  if (recorrencia?.frequencia === 'mensal') return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+  if (recorrencia?.frequencia === 'semanal') {
+    const inicioSemana = new Date(data);
+    inicioSemana.setDate(data.getDate() - ((data.getDay() + 6) % 7));
+    return `semana-${inicioSemana.getFullYear()}-${String(inicioSemana.getMonth() + 1).padStart(2, '0')}-${String(inicioSemana.getDate()).padStart(2, '0')}`;
+  }
+  return dia;
+}
+
+function tarefaConcluidaNoPeriodo(tarefa, recorrencia, criadoEm = null) {
+  if (!recorrencia?.ativa) return Boolean(tarefa.concluida);
+  if (recorrencia.frequencia === 'intervalo') return false;
+  if (tarefa.ultimaConclusaoEm) {
+    const proximoPrazo = calcularPrazoRecorrente(tarefa, { recorrencia, criadoEm });
+    return Boolean(proximoPrazo && Date.now() < proximoPrazo.getTime());
+  }
+  return tarefa.periodoConcluido === chavePeriodoRecorrencia(recorrencia);
+}
+
+function recorrenciaAgendadaHoje(recorrencia, data = new Date()) {
+  if (!recorrencia?.ativa) return true;
+  if (recorrencia.frequencia === 'diaria' || recorrencia.frequencia === 'intervalo') return true;
+  if (recorrencia.frequencia === 'mensal') return data.getDate() === Number(recorrencia.diaMes);
+  const dias = Array.isArray(recorrencia.diasSemana) ? recorrencia.diasSemana : [];
+  return dias.includes(data.getDay());
+}
+
+function definirHorarioRecorrencia(data, horario) {
+  const resultado = new Date(data);
+  if (horario) {
+    const [hora, minuto] = horario.split(':').map(Number);
+    resultado.setHours(hora, minuto, 0, 0);
+  }
+  return resultado;
+}
+
+function definirDiaDoMes(ano, mes, dia, horario) {
+  const data = new Date(ano, mes, 1);
+  const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+  data.setDate(Math.min(Math.max(1, Number(dia) || 1), ultimoDia));
+  return definirHorarioRecorrencia(data, horario);
+}
+
+function calcularPrazoRecorrente(tarefa, viagem, agora = new Date()) {
+  const recorrencia = viagem.recorrencia;
+  if (!recorrencia?.ativa) return null;
+  const ultimaConclusao = converterDataReaudicao(tarefa.ultimaConclusaoEm);
+  const criadoEm = converterDataReaudicao(tarefa.criadoEm) || converterDataReaudicao(viagem.criadoEm) || agora;
+
+  if (recorrencia.frequencia === 'intervalo') {
+    const base = ultimaConclusao || criadoEm;
+    const valor = Math.max(1, Number(recorrencia.intervaloValor ?? recorrencia.intervaloDias) || 1);
+    const unidade = recorrencia.intervaloUnidade || 'dias';
+    const multiplicador = unidade === 'minutos' ? 60000 : unidade === 'horas' ? 3600000 : 86400000;
+    return new Date(base.getTime() + valor * multiplicador);
+  }
+
+  if (recorrencia.frequencia === 'mensal') {
+    const base = ultimaConclusao || criadoEm;
+    let prazo = definirDiaDoMes(base.getFullYear(), base.getMonth(), recorrencia.diaMes, recorrencia.horaLimite);
+    if (ultimaConclusao || prazo < criadoEm) prazo = definirDiaDoMes(base.getFullYear(), base.getMonth() + 1, recorrencia.diaMes, recorrencia.horaLimite);
+    return prazo;
+  }
+
+  const horario = recorrencia.horaLimite || '23:59';
+  if (recorrencia.frequencia === 'diaria') {
+    const base = ultimaConclusao || criadoEm;
+    const prazo = definirHorarioRecorrencia(base, horario);
+    if (ultimaConclusao || prazo < criadoEm) prazo.setDate(prazo.getDate() + 1);
+    return prazo;
+  }
+
+  const dias = Array.isArray(recorrencia.diasSemana) ? recorrencia.diasSemana : [];
+  if (!dias.length) return null;
+  const base = ultimaConclusao || criadoEm;
+  const prazo = new Date(base);
+  if (ultimaConclusao) prazo.setDate(prazo.getDate() + 1);
+  for (let deslocamento = 0; deslocamento <= 7; deslocamento += 1) {
+    if (dias.includes(prazo.getDay())) {
+      const candidato = definirHorarioRecorrencia(prazo, horario);
+      if (ultimaConclusao || candidato >= criadoEm) return candidato;
+    }
+    prazo.setDate(prazo.getDate() + 1);
+  }
+  return null;
+}
+
+function obterPrazoTarefa(tarefa, viagem, data = new Date()) {
+  if (viagem.recorrencia?.ativa) {
+    const prazo = calcularPrazoRecorrente(tarefa, viagem, data);
+    return prazo && !Number.isNaN(prazo.getTime()) ? prazo : null;
+  }
+  if (tarefa.concluida) return null;
+  let prazo;
+  if (viagem.prazo) {
+    prazo = new Date(viagem.prazo);
+  } else if (Number(viagem.tempoMinimoMinutos) > 0) {
+    const inicio = converterDataReaudicao(viagem.criadoEm) || data;
+    prazo = new Date(inicio.getTime() + Number(viagem.tempoMinimoMinutos) * 60000);
+  } else {
+    return null;
+  }
+  return Number.isNaN(prazo.getTime()) ? null : prazo;
+}
+
+function atualizarContadoresTarefas() {
+  const agoraData = new Date();
+  const chaveDiaAtual = `${agoraData.getFullYear()}-${String(agoraData.getMonth() + 1).padStart(2, '0')}-${String(agoraData.getDate()).padStart(2, '0')}`;
+  if (tarefasListaAtual.length && chaveDiaAtual !== chaveDiaTarefasRenderizadas) {
+    const recorrentes = tarefasListaAtual.filter((item) => item.recorrencia?.ativa);
+    const unicas = tarefasListaAtual.filter((item) => !item.recorrencia?.ativa);
+    document.getElementById('lista-tarefas-recorrentes').innerHTML = renderizarCardsTarefas(recorrentes, true) || '<p class="empty-state">Nenhuma tarefa recorrente cadastrada.</p>';
+    document.getElementById('lista-viagens').innerHTML = renderizarCardsTarefas(unicas) || '<p class="empty-state">Nenhuma ação cadastrada.</p>';
+    chaveDiaTarefasRenderizadas = chaveDiaAtual;
+  }
+  let cicloAlterado = false;
+  tarefasListaAtual.forEach((viagem) => {
+    if (!viagem.recorrencia?.ativa) return;
+    (viagem.tarefas || []).forEach((tarefa, indice) => {
+      const checkbox = [...document.querySelectorAll('[data-tarefa-toggle]')].find((item) =>
+        item.dataset.tarefaToggle === viagem.id && Number(item.dataset.tarefaIndex) === indice);
+      if (checkbox && checkbox.checked !== tarefaConcluidaNoPeriodo(tarefa, viagem.recorrencia, viagem.criadoEm)) cicloAlterado = true;
+    });
+  });
+  if (cicloAlterado) {
+    const recorrentes = tarefasListaAtual.filter((item) => item.recorrencia?.ativa);
+    const unicas = tarefasListaAtual.filter((item) => !item.recorrencia?.ativa);
+    document.getElementById('lista-tarefas-recorrentes').innerHTML = renderizarCardsTarefas(recorrentes, true) || '<p class="empty-state">Nenhuma tarefa recorrente cadastrada.</p>';
+    document.getElementById('lista-viagens').innerHTML = renderizarCardsTarefas(unicas) || '<p class="empty-state">Nenhuma ação cadastrada.</p>';
+  }
+  const agora = Date.now();
+  document.querySelectorAll('[data-prazo-tarefa]').forEach((elemento) => {
+    const prazo = new Date(elemento.dataset.prazoTarefa).getTime();
+    if (!Number.isFinite(prazo)) return;
+    const diferenca = prazo - agora;
+    if (diferenca <= 0) {
+      const atraso = Math.floor(Math.abs(diferenca) / 1000);
+      const horas = String(Math.floor(atraso / 3600)).padStart(2, '0');
+      const minutos = String(Math.floor((atraso % 3600) / 60)).padStart(2, '0');
+      const segundos = String(atraso % 60).padStart(2, '0');
+      elemento.textContent = `Você está em ${horas}:${minutos}:${segundos} atrasado`;
+      elemento.classList.add('prazo-atrasado');
+    } else {
+      const restante = Math.floor(diferenca / 1000);
+      const horas = String(Math.floor(restante / 3600)).padStart(2, '0');
+      const minutos = String(Math.floor((restante % 3600) / 60)).padStart(2, '0');
+      const segundos = String(restante % 60).padStart(2, '0');
+      const prefixo = elemento.dataset.proximaTarefa === 'true' ? 'Próxima tarefa em' : 'Prazo em';
+      elemento.textContent = `${prefixo} ${horas}:${minutos}:${segundos}`;
+      elemento.classList.remove('prazo-atrasado');
+    }
+    if (diferenca <= 0) dispararAlertaPrazo(elemento.dataset.alertaTarefa);
+  });
+}
+
+function dispararAlertaPrazo(chave) {
+  if (!chave) return;
+  const chaveStorage = `musicbox:alerta:${obterUsuarioTimerId()}:${chave}`;
+  if (localStorage.getItem(chaveStorage)) return;
+  localStorage.setItem(chaveStorage, '1');
+  mostrarToast('Uma tarefa atingiu o prazo definido.', 'erro');
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('MusicBox · prazo de tarefa', { body: 'Uma tarefa atingiu o horário limite.' });
+  }
+}
+
+function renderizarCardsTarefas(lista, recorrentes = false) {
+  const ordenadas = [...lista].sort((a, b) => Number(Boolean(b.fixada)) - Number(Boolean(a.fixada)) ||
+    (converterDataReaudicao(b.atualizadoEm)?.getTime() || 0) - (converterDataReaudicao(a.atualizadoEm)?.getTime() || 0));
+  return ordenadas.map((viagem) => {
+    const recorrencia = viagem.recorrencia || null;
+    const tarefas = Array.isArray(viagem.tarefas) && viagem.tarefas.length
+      ? viagem.tarefas
+      : [{ texto: viagem.titulo || 'Ação', concluida: Boolean(viagem.realizada) }];
+    const concluida = tarefas.every((tarefa) => tarefaConcluidaNoPeriodo(tarefa, recorrencia, viagem.criadoEm));
+    const unidadeIntervalo = recorrencia?.intervaloUnidade || 'dias';
+    const valorIntervalo = Number(recorrencia?.intervaloValor ?? recorrencia?.intervaloDias) || 1;
+    const configuracaoRecorrencia = recorrencia?.ativa
+      ? `${recorrencia.frequencia === 'diaria' ? 'Diária' : recorrencia.frequencia === 'semanal' ? 'Semanal' : recorrencia.frequencia === 'mensal' ? `Todo dia ${recorrencia.diaMes} do mês` : recorrencia.frequencia === 'intervalo' ? `A cada ${valorIntervalo} ${unidadeIntervalo}` : 'Dias da semana'}${recorrencia.diasSemana?.length ? ` · ${recorrencia.diasSemana.map((dia) => ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][dia]).join(', ')}` : ''}${recorrencia.horaLimite ? ` · às ${recorrencia.horaLimite}` : ''}`
+      : '';
+    return `
+      <article class="viagem-card ${concluida ? 'viagem-feita' : ''} ${viagem.fixada ? 'tarefa-fixada' : ''} ${recorrentes ? 'tarefa-recorrente' : ''}">
+        <div class="card-cabecalho">
+          <h3>${viagem.fixada ? '📌 ' : ''}${escaparHtml(viagem.titulo || 'Ação')}</h3>
+          <span class="badge-duracao ${concluida ? 'feito' : ''}">${concluida ? (recorrentes ? 'Concluída no período' : 'Concluída') : (recorrentes ? 'Recorrente' : 'Pendente')}</span>
+        </div>
+        ${configuracaoRecorrencia ? `<p class="viagem-status-data">${escaparHtml(configuracaoRecorrencia)}</p>` : ''}
+        ${!recorrentes ? `<p class="viagem-status-data">${viagem.realizada ? `Realizada em: ${formatarDataHora(viagem.realizadaEm)}` : 'Ainda não marcada como concluída'}</p>` : ''}
+        <div class="lista-tarefas-card">
+          ${tarefas.map((tarefa, index) => {
+            const feita = tarefaConcluidaNoPeriodo(tarefa, recorrencia, viagem.criadoEm);
+            const prazo = obterPrazoTarefa(tarefa, viagem);
+            const chaveAlerta = prazo ? `${viagem.id}-${index}-${prazo.toISOString()}` : '';
+            const agendadaHoje = !recorrentes || recorrenciaAgendadaHoje(recorrencia);
+            return `<div class="tarefa-com-prazo"><label class="viagem-status-row"><input type="checkbox" data-tarefa-toggle="${viagem.id}" data-tarefa-index="${index}" ${feita ? 'checked' : ''} ${agendadaHoje ? '' : 'disabled'}><span>${escaparHtml(tarefa.texto || `Tarefa ${index + 1}`)}</span></label>${prazo ? `<span class="tarefa-prazo" data-prazo-tarefa="${prazo.toISOString()}" data-proxima-tarefa="${recorrencia?.frequencia === 'intervalo'}" data-alerta-tarefa="${escaparHtml(chaveAlerta)}"></span>` : !agendadaHoje ? '<span class="tarefa-prazo">Fora do dia programado</span>' : ''}</div>`;
+          }).join('')}
+        </div>
+        <div class="card-datas">Criado: ${formatarDataHora(viagem.criadoEm)}<br>Atualizado: ${formatarDataHora(viagem.atualizadoEm)}</div>
+        <div class="card-acoes">
+          <button type="button" class="btn-alerta" data-viagem-editar="${viagem.id}">Editar</button>
+          <button type="button" class="btn-perigo" data-viagem-excluir="${viagem.id}">Excluir</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
 function subscribeViagens() {
   if (!usuarioAtual) return;
 
@@ -1285,57 +1536,16 @@ function subscribeViagens() {
       const dados = item.data();
       if (dados.categoria === 'viagem') lista.push({ id: item.id, ...dados });
     });
-    lista.sort((a, b) => {
-      const aa = a.atualizadoEm && a.atualizadoEm.toDate ? a.atualizadoEm.toDate() : new Date(a.atualizadoEm || 0);
-      const bb = b.atualizadoEm && b.atualizadoEm.toDate ? b.atualizadoEm.toDate() : new Date(b.atualizadoEm || 0);
-      return bb - aa;
-    });
-
-    const container = document.getElementById('lista-viagens');
-    if (!container) return;
-    if (!lista.length) {
-      container.innerHTML = '<p class="empty-state">Nenhuma viagem cadastrada.</p>';
-      return;
-    }
-
-    container.innerHTML = lista.map((viagem) => {
-      const realizada = Boolean(viagem.realizada);
-      const marcadaEm = viagem.realizadaEm ? formatarDataHora(viagem.realizadaEm) : 'Ainda não marcada';
-      const tarefas = Array.isArray(viagem.tarefas) && viagem.tarefas.length
-        ? viagem.tarefas
-        : [{ texto: viagem.titulo || 'Ação', concluida: realizada }];
-
-      return `
-        <div class="viagem-card ${realizada ? 'viagem-feita' : ''}">
-          <div class="card-cabecalho">
-            <h3>${viagem.titulo || 'Viagem'}</h3>
-            <span class="badge-duracao ${realizada ? 'feito' : ''}">${realizada ? 'Concluída' : 'Pendente'}</span>
-          </div>
-
-          <div class="lista-tarefas-card">
-            ${tarefas.map((tarefa, index) => `
-              <label class="viagem-status-row">
-                <input type="checkbox" data-tarefa-toggle="${viagem.id}" data-tarefa-index="${index}" ${tarefa.concluida ? 'checked' : ''}>
-                <span>${escaparHtml(tarefa.texto || `Tarefa ${index + 1}`)}</span>
-              </label>
-            `).join('')}
-          </div>
-
-          <div class="viagem-status-data">
-            ${realizada ? `Realizada em: ${marcadaEm}` : `Data da realização: ${marcadaEm}`}
-          </div>
-
-          <div class="card-datas">
-            Criado: ${formatarDataHora(viagem.criadoEm)}<br>
-            Atualizado: ${formatarDataHora(viagem.atualizadoEm)}
-          </div>
-          <div class="card-acoes">
-            <button type="button" class="btn-alerta" data-viagem-editar="${viagem.id}">Editar</button>
-            <button type="button" class="btn-perigo" data-viagem-excluir="${viagem.id}">Excluir</button>
-          </div>
-        </div>
-      `;
-    }).join('');
+    tarefasListaAtual = lista;
+    const agora = new Date();
+    chaveDiaTarefasRenderizadas = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}-${String(agora.getDate()).padStart(2, '0')}`;
+    const tarefasRecorrentes = lista.filter((item) => item.recorrencia?.ativa);
+    const tarefasUnicas = lista.filter((item) => !item.recorrencia?.ativa);
+    const containerRecorrentes = document.getElementById('lista-tarefas-recorrentes');
+    const containerUnicas = document.getElementById('lista-viagens');
+    if (containerRecorrentes) containerRecorrentes.innerHTML = renderizarCardsTarefas(tarefasRecorrentes, true) || '<p class="empty-state">Nenhuma tarefa recorrente cadastrada.</p>';
+    if (containerUnicas) containerUnicas.innerHTML = renderizarCardsTarefas(tarefasUnicas) || '<p class="empty-state">Nenhuma ação cadastrada.</p>';
+    atualizarContadoresTarefas();
   }, (erro) => {
     console.error('Erro ao carregar To Do Lists:', erro);
     const container = document.getElementById('lista-viagens');
@@ -1345,9 +1555,33 @@ function subscribeViagens() {
   });
 }
 
+if (!window.intervaloContadoresTarefas) {
+  window.intervaloContadoresTarefas = window.setInterval(atualizarContadoresTarefas, 1000);
+}
+
+function atualizarCamposRecorrencia() {
+  const recorrente = document.getElementById('viagem-recorrente').checked;
+  const frequencia = document.getElementById('viagem-frequencia').value;
+  document.getElementById('config-recorrencia').classList.toggle('escondido', !recorrente);
+  document.getElementById('viagem-dias-semana').classList.toggle('escondido', !recorrente || !['dias-semana', 'semanal'].includes(frequencia));
+  document.getElementById('grupo-intervalo-dias').classList.toggle('escondido', !recorrente || frequencia !== 'intervalo');
+  document.getElementById('grupo-dia-mes').classList.toggle('escondido', !recorrente || frequencia !== 'mensal');
+  document.getElementById('viagem-hora-limite').disabled = !recorrente || frequencia === 'intervalo';
+}
+
+document.getElementById('viagem-recorrente').addEventListener('change', atualizarCamposRecorrencia);
+document.getElementById('viagem-frequencia').addEventListener('change', atualizarCamposRecorrencia);
+document.getElementById('btn-ativar-notificacoes').addEventListener('click', async () => {
+  if (!('Notification' in window)) return mostrarToast('Este navegador não oferece notificações.', 'erro');
+  const permissao = await Notification.requestPermission();
+  mostrarToast(permissao === 'granted' ? 'Alertas de prazo ativados.' : 'Permissão para notificações não concedida.', permissao === 'granted' ? 'sucesso' : 'erro');
+});
+
 document.getElementById('btn-nova-viagem').addEventListener('click', () => {
   document.getElementById('form-viagem').reset();
   document.getElementById('viagem-id').value = '';
+  document.querySelectorAll('#viagem-dias-semana input').forEach((item) => { item.checked = false; });
+  atualizarCamposRecorrencia();
   controlarFormularioRecolhivel('form-viagem', true);
   document.getElementById('viagem-titulo').focus();
 });
@@ -1355,6 +1589,7 @@ document.getElementById('btn-nova-viagem').addEventListener('click', () => {
 document.getElementById('btn-cancelar-viagem').addEventListener('click', () => {
   document.getElementById('form-viagem').reset();
   document.getElementById('viagem-id').value = '';
+  atualizarCamposRecorrencia();
   controlarFormularioRecolhivel('form-viagem', false);
 });
 
@@ -1365,11 +1600,36 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
   const usuarioAtivo = obterUsuarioAtivo();
   const id = document.getElementById('viagem-id').value;
   const titulo = document.getElementById('viagem-titulo').value.trim();
-  const tarefas = document.getElementById('viagem-tarefas').value
+  const textosTarefas = document.getElementById('viagem-tarefas').value
     .split(';')
     .map((texto) => texto.trim())
-    .filter(Boolean)
-    .map((texto) => ({ texto, concluida: false }));
+    .filter(Boolean);
+  const ehRecorrente = document.getElementById('viagem-recorrente').checked;
+  const frequencia = document.getElementById('viagem-frequencia').value;
+  const diasSemana = [...document.querySelectorAll('#viagem-dias-semana input:checked')].map((item) => Number(item.value));
+  const horario = document.getElementById('viagem-hora-limite').value;
+  const intervaloValor = Math.max(1, Number(document.getElementById('viagem-intervalo-dias').value) || 1);
+  const intervaloUnidade = document.getElementById('viagem-intervalo-unidade').value;
+  const diaMes = Math.min(31, Math.max(1, Number(document.getElementById('viagem-dia-mes').value) || 1));
+  if (ehRecorrente && frequencia !== 'intervalo' && !horario) {
+    return mostrarToast('Informe o horário da tarefa recorrente.', 'erro');
+  }
+  if (ehRecorrente && ['dias-semana', 'semanal'].includes(frequencia) && !diasSemana.length) {
+    return mostrarToast('Selecione ao menos um dia para a tarefa recorrente.', 'erro');
+  }
+  if (ehRecorrente && frequencia === 'semanal' && diasSemana.length !== 1) {
+    return mostrarToast('Selecione exatamente um dia para a recorrência semanal.', 'erro');
+  }
+  const recorrencia = ehRecorrente ? {
+    ativa: true,
+    frequencia,
+    diasSemana: ['dias-semana', 'semanal'].includes(frequencia) ? diasSemana : [],
+    intervaloValor: frequencia === 'intervalo' ? intervaloValor : null,
+    intervaloUnidade: frequencia === 'intervalo' ? intervaloUnidade : null,
+    diaMes: frequencia === 'mensal' ? diaMes : null,
+    horaLimite: frequencia === 'intervalo' ? null : horario
+  } : null;
+  const fixada = document.getElementById('viagem-fixada').checked;
 
   if (!titulo) {
     return mostrarToast('Informe o nome da viagem.', 'erro');
@@ -1378,11 +1638,17 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
   try {
     if (id) {
       const viagemAnterior = (await getDoc(doc(db, 'viagens', id))).data() || {};
-      const tarefasAtualizadas = tarefas.length ? tarefas : [{ texto: titulo, concluida: false }];
+      const tarefasAntigas = Array.isArray(viagemAnterior.tarefas) ? viagemAnterior.tarefas : [];
+      const tarefasAtualizadas = (textosTarefas.length ? textosTarefas : [titulo]).map((texto, index) => {
+        const anterior = tarefasAntigas.find((tarefa) => tarefa.texto === texto) || tarefasAntigas[index] || {};
+        return { ...anterior, texto, concluida: Boolean(anterior.concluida) };
+      });
       await updateDoc(doc(db, 'viagens', id), {
         categoria: 'viagem',
         titulo,
         tarefas: tarefasAtualizadas,
+        recorrencia,
+        fixada,
         atualizadoEm: serverTimestamp()
       });
       mostrarToast('Viagem atualizada!');
@@ -1390,7 +1656,9 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
       await addDoc(collection(db, 'viagens'), {
         categoria: 'viagem',
         titulo,
-        tarefas: tarefas.length ? tarefas : [{ texto: titulo, concluida: false }],
+        tarefas: (textosTarefas.length ? textosTarefas : [titulo]).map((texto) => ({ texto, concluida: false })),
+        recorrencia,
+        fixada,
         userId: usuarioAtivo.uid,
         realizada: false,
         realizadaEm: null,
@@ -1409,9 +1677,9 @@ document.getElementById('form-viagem').addEventListener('submit', async (e) => {
   }
 });
 
-document.getElementById('lista-viagens').addEventListener('click', async (event) => {
-  const editarId = event.target.dataset.viagemEditar;
-  const excluirId = event.target.dataset.viagemExcluir;
+['lista-viagens', 'lista-tarefas-recorrentes'].forEach((idLista) => document.getElementById(idLista).addEventListener('click', async (event) => {
+  const editarId = event.target.closest('[data-viagem-editar]')?.dataset.viagemEditar;
+  const excluirId = event.target.closest('[data-viagem-excluir]')?.dataset.viagemExcluir;
 
   if (editarId) {
     const docSnap = await getDoc(doc(db, 'viagens', editarId));
@@ -1421,6 +1689,15 @@ document.getElementById('lista-viagens').addEventListener('click', async (event)
     document.getElementById('viagem-id').value = editarId;
     document.getElementById('viagem-titulo').value = dados.titulo || '';
     document.getElementById('viagem-tarefas').value = (dados.tarefas || []).map((tarefa) => tarefa.texto).join('; ');
+    document.getElementById('viagem-recorrente').checked = Boolean(dados.recorrencia?.ativa);
+    document.getElementById('viagem-frequencia').value = dados.recorrencia?.frequencia || 'diaria';
+    document.getElementById('viagem-intervalo-dias').value = dados.recorrencia?.intervaloValor || dados.recorrencia?.intervaloDias || 1;
+    document.getElementById('viagem-intervalo-unidade').value = dados.recorrencia?.intervaloUnidade || 'dias';
+    document.getElementById('viagem-dia-mes').value = dados.recorrencia?.diaMes || 21;
+    document.getElementById('viagem-hora-limite').value = dados.recorrencia?.horaLimite || '';
+    document.querySelectorAll('#viagem-dias-semana input').forEach((item) => { item.checked = (dados.recorrencia?.diasSemana || []).includes(Number(item.value)); });
+    document.getElementById('viagem-fixada').checked = Boolean(dados.fixada);
+    atualizarCamposRecorrencia();
     controlarFormularioRecolhivel('form-viagem', true);
     document.getElementById('viagem-titulo').focus();
   }
@@ -1431,9 +1708,9 @@ document.getElementById('lista-viagens').addEventListener('click', async (event)
       mostrarToast('Viagem removida!');
     }
   }
-});
+}));
 
-document.getElementById('lista-viagens').addEventListener('change', async (event) => {
+['lista-viagens', 'lista-tarefas-recorrentes'].forEach((idLista) => document.getElementById(idLista).addEventListener('change', async (event) => {
   const checkbox = event.target.closest('[data-tarefa-toggle]');
   if (!checkbox) return;
 
@@ -1446,8 +1723,15 @@ document.getElementById('lista-viagens').addEventListener('change', async (event
     ? viagem.tarefas
     : [{ texto: viagem.titulo || 'Ação', concluida: false }];
   if (!tarefas[tarefaIndex]) return;
-  tarefas[tarefaIndex].concluida = checkbox.checked;
-  const todasConcluidas = tarefas.every((tarefa) => tarefa.concluida);
+  const recorrencia = viagem.recorrencia || null;
+  const marcarConcluida = checkbox.checked;
+  tarefas[tarefaIndex].concluida = recorrencia?.frequencia === 'intervalo' ? false : marcarConcluida;
+  if (recorrencia?.ativa) {
+    tarefas[tarefaIndex].ultimaConclusaoEm = marcarConcluida ? new Date().toISOString() : null;
+    tarefas[tarefaIndex].periodoConcluido = marcarConcluida ? chavePeriodoRecorrencia(recorrencia) : null;
+  }
+  if (recorrencia?.frequencia === 'intervalo') checkbox.checked = false;
+  const todasConcluidas = tarefas.every((tarefa) => tarefaConcluidaNoPeriodo(tarefa, recorrencia, viagem.criadoEm));
 
   await updateDoc(doc(db, 'viagens', viagemId), {
     categoria: 'viagem',
@@ -1457,8 +1741,10 @@ document.getElementById('lista-viagens').addEventListener('change', async (event
     atualizadoEm: serverTimestamp()
   });
 
-  mostrarToast(checkbox.checked ? 'Tarefa concluída!' : 'Tarefa reaberta.');
-});
+  mostrarToast(recorrencia?.frequencia === 'intervalo' && marcarConcluida
+    ? 'Ciclo reiniciado. O próximo prazo já está contando.'
+    : marcarConcluida ? 'Tarefa concluída!' : 'Tarefa reaberta.');
+}));
 
 // REAUDICOES E COMPARACOES
 function converterDataReaudicao(valor) {
@@ -1732,7 +2018,7 @@ function iniciarAvaliacaoCompleta(fonteSelecionada) {
     document.getElementById('img-preview').src = albumOriginal.imagem || '';
     containerFaixas.innerHTML = '';
     if (Array.isArray(albumOriginal.faixas) && albumOriginal.faixas.length) {
-      albumOriginal.faixas.forEach((faixa) => addLinhaFaixa(faixa.nome || '', 'Boa'));
+      albumOriginal.faixas.forEach((faixa) => addLinhaFaixa(faixa.nome || '', faixa.classificacao || 'Boa', faixa));
     } else addLinhaFaixa();
   }
   document.getElementById('form-titulo').textContent = albumOriginal
@@ -2163,7 +2449,7 @@ function abrirEdicaoReaudicao(id) {
     document.getElementById('album-imagem').value = item.capa || '';
   }
   containerFaixas.innerHTML = '';
-  (item.faixas || []).forEach((faixa) => addLinhaFaixa(faixa.nome || '', faixa.classificacao || 'Boa'));
+  (item.faixas || []).forEach((faixa) => addLinhaFaixa(faixa.nome || '', faixa.classificacao || 'Boa', faixa));
   if (!item.faixas?.length) addLinhaFaixa();
   document.getElementById('form-titulo').textContent = `Editar ré-audição: ${item.album || item.nome || 'Álbum'}`;
   document.getElementById('btn-salvar').textContent = 'Atualizar Ré-audição';
@@ -2731,23 +3017,66 @@ document.getElementById('btn-cancelar-album').addEventListener('click', () => {
   navegarPara(telaRetorno);
 });
 
-function addLinhaFaixa(nome = '', nota = 'Boa') {
+function addLinhaFaixa(nome = '', nota = 'Boa', opcoes = {}) {
   const div = document.createElement('div');
   div.className = 'linha-faixa';
   const nomeInicial = nome || `Faixa ${containerFaixas.children.length + 1}`;
+  const urlDownload = normalizarUrlDownload(opcoes.downloadUrl || '');
+  const favoritaInicial = Boolean(opcoes.favorita) && !containerFaixas.querySelector('.faixa-favorita:checked');
   const ehNomePadrao = !nome || /^Faixa \d+$/.test(nomeInicial);
   div.dataset.nomePadrao = ehNomePadrao ? 'true' : 'false';
   div.innerHTML = `
-    <input type="text" placeholder="Faixa ${containerFaixas.children.length + 1}" value="${nomeInicial}" class="faixa-nome">
+    <input type="text" placeholder="Faixa ${containerFaixas.children.length + 1}" value="${escaparHtml(nomeInicial)}" class="faixa-nome" aria-label="Nome da faixa">
     <select class="faixa-nota">
       ${Object.keys(PESO_NOTAS).map(k => `<option value="${k}" ${k === nota ? 'selected' : ''}>${k} (${PESO_NOTAS[k]})</option>`).join('')}
     </select>
-    <button type="button" onclick="removerLinhaFaixa(this)" class="btn-perigo">X</button>
+    <button type="button" onclick="removerLinhaFaixa(this)" class="btn-perigo" aria-label="Remover faixa">X</button>
+    <div class="faixa-opcoes">
+      <label><input type="checkbox" class="faixa-favorita" ${favoritaInicial ? 'checked' : ''}> Favorita</label>
+      <label><input type="checkbox" class="faixa-desconsiderar" ${opcoes.desconsiderarMedia ? 'checked' : ''}> Desconsiderar da média</label>
+      <input type="url" class="faixa-download" value="${escaparHtml(urlDownload)}" placeholder="URL para download (opcional)" aria-label="URL para download">
+      <a class="faixa-download-link ${urlDownload ? '' : 'escondido'}" href="${escaparHtml(urlDownload || '#')}" download target="_blank" rel="noopener">Baixar faixa</a>
+    </div>
   `;
   div.querySelector('.faixa-nome').addEventListener('input', (event) => {
     div.dataset.nomePadrao = event.target.value.trim() === '' || /^Faixa \d+$/.test(event.target.value.trim()) ? 'true' : 'false';
   });
+  div.querySelector('.faixa-favorita').addEventListener('change', (event) => {
+    if (event.target.checked) {
+      containerFaixas.querySelectorAll('.faixa-favorita').forEach((checkbox) => {
+        if (checkbox !== event.target) checkbox.checked = false;
+      });
+    }
+  });
+  div.querySelector('.faixa-download').addEventListener('input', (event) => {
+    const link = div.querySelector('.faixa-download-link');
+    const url = normalizarUrlDownload(event.target.value);
+    link.href = url || '#';
+    link.classList.toggle('escondido', !url);
+    event.target.setCustomValidity(event.target.value.trim() && !url ? 'Informe uma URL HTTP ou HTTPS válida.' : '');
+  });
   containerFaixas.appendChild(div);
+  div.addEventListener('input', atualizarNotaParcialAlbum);
+  div.addEventListener('change', atualizarNotaParcialAlbum);
+  atualizarNotaParcialAlbum();
+}
+
+function normalizarUrlDownload(valor) {
+  try {
+    const url = new URL(String(valor || '').trim());
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function atualizarNotaParcialAlbum() {
+  const linhasValidas = [...containerFaixas.querySelectorAll('.linha-faixa')]
+    .filter((linha) => !linha.querySelector('.faixa-desconsiderar').checked);
+  const soma = linhasValidas.reduce((total, linha) => total + (PESO_NOTAS[linha.querySelector('.faixa-nota').value] || 0), 0);
+  const media = linhasValidas.length ? soma / linhasValidas.length : 0;
+  const indicador = document.getElementById('nota-parcial-album');
+  if (indicador) indicador.textContent = `Nota parcial: ${media.toFixed(1)} · ${linhasValidas.length} faixa(s)`;
 }
 
 function renumerarFaixasPadrao() {
@@ -2763,6 +3092,7 @@ function renumerarFaixasPadrao() {
 window.removerLinhaFaixa = function(botao) {
   botao.closest('.linha-faixa')?.remove();
   renumerarFaixasPadrao();
+  atualizarNotaParcialAlbum();
 };
 
 // SALVAR ÁLBUM
@@ -2787,7 +3117,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     atualizarTempoDecorridoTimer();
     const ano = Number(document.getElementById('album-ano').value);
     const urlImagemInput = document.getElementById('album-imagem').value;
-    const favorita = document.getElementById('album-favorita').value;
+    const favoritaTexto = document.getElementById('album-favorita').value;
     const obs = document.getElementById('album-obs').value;
     const duracaoInformada = document.getElementById('album-duracao').value.trim();
     const duracao = timerAudicaoSegundos > 0 ? formatarDuracao(timerAudicaoSegundos) : duracaoInformada;
@@ -2798,14 +3128,21 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     const imagemFinal = imagemBase64Temp || urlImagemInput || '';
     const faixasInputs = document.querySelectorAll('.linha-faixa');
     let somaNotas = 0;
+    let quantidadeFaixasValidas = 0;
     const faixas = [];
 
     faixasInputs.forEach((el, index) => {
       let fNome = el.querySelector('.faixa-nome').value.trim();
       const fNota = el.querySelector('.faixa-nota').value;
       if (!fNome) fNome = `Faixa ${index + 1}`;
-      somaNotas += PESO_NOTAS[fNota];
-      faixas.push({ nome: fNome, classificacao: fNota });
+      const desconsiderarMedia = el.querySelector('.faixa-desconsiderar').checked;
+      const faixaFavorita = el.querySelector('.faixa-favorita').checked;
+      const downloadUrl = normalizarUrlDownload(el.querySelector('.faixa-download').value);
+      if (!desconsiderarMedia) {
+        somaNotas += PESO_NOTAS[fNota];
+        quantidadeFaixasValidas += 1;
+      }
+      faixas.push({ nome: fNome, classificacao: fNota, favorita: faixaFavorita, desconsiderarMedia, downloadUrl });
     });
 
     if (faixas.length === 0) {
@@ -2814,8 +3151,11 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       return mostrarToast("Adicione pelo menos uma faixa!", "erro");
     }
 
-    const media = parseFloat((somaNotas / faixas.length).toFixed(2));
+    const media = quantidadeFaixasValidas ? parseFloat((somaNotas / quantidadeFaixasValidas).toFixed(2)) : 0;
     const nmp = parseFloat(((media / 10) * 100).toFixed(1));
+    const faixaFavorita = faixas.find((faixa) => faixa.favorita);
+    const favorita = faixaFavorita?.nome || favoritaTexto;
+    const faixaFavoritaNumero = faixaFavorita ? faixas.indexOf(faixaFavorita) + 1 : null;
     const agoraISO = new Date().toISOString();
 
     const salvandoReaudicao = reaudicaoModoAtivo;
@@ -2825,7 +3165,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       : null;
     if (salvandoReaudicao) {
       const registroHistorico = {
-        nome, banda, ano, imagem: imagemFinal, favorita, obs, faixas,
+        nome, banda, ano, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp, duracao, duracaoSegundos,
         userId: usuarioAtual.uid,
         origem: registroEmEdicao?.origem || (reaudicaoAlbumOriginal?.tipoCatalogo === 'caderno' ? 'caderno_antigo' : (reaudicaoAlbumOriginal ? 'album_principal' : 'avaliacao_manual')),
@@ -2853,7 +3193,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       mostrarToast('Ré-audição salva no histórico!');
     } else if (id) {
       const updateData = {
-        nome, banda, ano, imagem: imagemFinal, favorita, obs, faixas,
+        nome, banda, ano, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp, duracao, duracaoSegundos, atualizadoEm: agoraISO
       };
       await updateDoc(doc(db, "albuns", id), updateData);
@@ -2861,7 +3201,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     } else {
       const idadeCadastro = calcularIdade(new Date());
       const novoData = {
-        nome, banda, ano, imagem: imagemFinal, favorita, obs, faixas,
+        nome, banda, ano, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp,
         duracao,
         duracaoSegundos,
@@ -2923,6 +3263,11 @@ async function carregarAlbuns() {
       console.info('Coleção legada reaudicoes indisponível; mantendo as coleções atuais.');
     }
 
+    preencherAutocompleteBandas([
+      ...snapshot.docs.map((docSnap) => docSnap.data().banda),
+      ...documentosHistorico.map(({ data }) => data.bandaCaderno || data.nomeBanda || data.banda || data.artista)
+    ]);
+
     todosOsAlbuns = [];
     snapshot.docs.forEach((docSnap) => {
       const album = { id: docSnap.id, ...docSnap.data() };
@@ -2965,6 +3310,14 @@ async function carregarAlbuns() {
   } catch (erro) {
     grid.innerHTML = '<p style="color: red;">Erro ao carregar álbuns.</p>';
   }
+}
+
+function preencherAutocompleteBandas(valores = []) {
+  const datalist = document.getElementById('lista-bandas-autocomplete');
+  if (!datalist) return;
+  const bandas = [...new Set(valores.map((banda) => String(banda || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  datalist.innerHTML = bandas.map((banda) => `<option value="${escaparHtml(banda)}"></option>`).join('');
 }
 
 window.aplicarFiltrosEBuscar = function() {
@@ -3124,7 +3477,8 @@ window.editarAlbum = async function(id) {
 
     const container = document.getElementById('container-faixas');
     container.innerHTML = '';
-    data.faixas.forEach(f => addLinhaFaixa(f.nome, f.classificacao));
+    (data.faixas || []).forEach(f => addLinhaFaixa(f.nome, f.classificacao, f));
+    if (!data.faixas?.length) addLinhaFaixa();
 
     document.getElementById('form-titulo').innerText = 'Editar Álbum';
     navegarPara('sec-novo-album');
@@ -3617,6 +3971,119 @@ function filtrarRegistrosPorOrigem(registros, origem) {
   return selecionarRegistrosUnicosPorAlbum(filtrados);
 }
 
+function renderizarGraficosEstatisticas(albuns) {
+  const ranking = document.getElementById('ranking-albuns');
+  if (ranking) {
+    const melhores = [...albuns].sort((a, b) => Number(b.media || 0) - Number(a.media || 0)).slice(0, 10);
+    ranking.innerHTML = melhores.length ? melhores.map((album) => `
+      <li><span>${escaparHtml(album.nome || 'Álbum sem nome')} <small>${escaparHtml(album.banda || '')}</small></span><strong>${Number(album.media || 0).toFixed(1)}</strong></li>
+    `).join('') : '<li class="empty-state">Sem avaliações para ranquear.</li>';
+  }
+
+  const cores = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#14b8a6', '#e879f9', '#f97316', '#a3e635'];
+  const bandas = new Map();
+  albuns.forEach((album) => {
+    const ano = Number(album.ano);
+    const nota = Number(album.media);
+    if (!Number.isFinite(ano) || !Number.isFinite(nota)) return;
+    const nome = String(album.banda || 'Desconhecida');
+    if (!bandas.has(nome)) bandas.set(nome, []);
+    bandas.get(nome).push({ x: ano, y: nota, album: album.nome || 'Álbum sem nome' });
+  });
+  const bandasGrafico = [...bandas.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 8);
+  const canvasBandas = document.getElementById('graficoEvolucaoBandas');
+  if (graficoEvolucaoBandas) graficoEvolucaoBandas.destroy();
+  if (canvasBandas && typeof Chart !== 'undefined') {
+    graficoEvolucaoBandas = new Chart(canvasBandas.getContext('2d'), {
+      type: 'scatter',
+      data: { datasets: bandasGrafico.map(([banda, pontos], indice) => ({
+        label: banda,
+        data: pontos.sort((a, b) => a.x - b.x),
+        showLine: true,
+        borderColor: cores[indice % cores.length],
+        backgroundColor: cores[indice % cores.length],
+        pointRadius: 5,
+        tension: 0.2
+      })) },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: { legend: { labels: { color: '#e5e7eb' } }, tooltip: { callbacks: { label: (context) => `${context.dataset.label} · ${context.raw.album} · ${context.raw.x} · ${context.raw.y.toFixed(1)}` } } },
+        scales: {
+          x: { type: 'linear', title: { display: true, text: 'Ano de lançamento', color: '#e5e7eb' }, ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { min: 0, max: 10, title: { display: true, text: 'Nota média', color: '#e5e7eb' }, ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(255,255,255,0.08)' } }
+        }
+      }
+    });
+  }
+
+  const dias = new Map();
+  albuns.forEach((album) => {
+    const data = converterDataReaudicao(album.dataReouvido || album.criadoEm || album.dataOriginal);
+    const nota = Number(album.media);
+    if (!data || !Number.isFinite(nota)) return;
+    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+    const atual = dias.get(chave) || { soma: 0, quantidade: 0 };
+    atual.soma += nota;
+    atual.quantidade += 1;
+    dias.set(chave, atual);
+  });
+  const pontosDia = [...dias.entries()].map(([dia, valores]) => ({ x: new Date(`${dia}T12:00:00`).getTime(), y: valores.soma / valores.quantidade, dia, quantidade: valores.quantidade }));
+  const canvasDias = document.getElementById('graficoDispersaoNotasDia');
+  if (graficoNotasDia) graficoNotasDia.destroy();
+  if (canvasDias && typeof Chart !== 'undefined') {
+    graficoNotasDia = new Chart(canvasDias.getContext('2d'), {
+      type: 'scatter',
+      data: { datasets: [{ label: 'Média diária', data: pontosDia, backgroundColor: '#f59e0b', borderColor: '#fbbf24', pointRadius: 6 }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#e5e7eb' } }, tooltip: { callbacks: { label: (context) => `${formatarDataReaudicao(context.raw.dia)} · ${context.raw.y.toFixed(1)} (${context.raw.quantidade} audição(ões))` } } },
+        scales: {
+          x: { type: 'linear', ticks: { color: '#cbd5e1', callback: (valor) => new Intl.DateTimeFormat('pt-BR').format(new Date(Number(valor))) }, title: { display: true, text: 'Dia', color: '#e5e7eb' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { min: 0, max: 10, ticks: { color: '#cbd5e1' }, title: { display: true, text: 'Nota média do dia', color: '#e5e7eb' }, grid: { color: 'rgba(255,255,255,0.08)' } }
+        }
+      }
+    });
+  }
+}
+
+function atualizarMetricasBandas(albunsFiltrados) {
+  const bandasPorNota = new Map();
+  albunsFiltrados.forEach((album) => {
+    const banda = String(album.banda || 'Desconhecida').trim();
+    const valores = bandasPorNota.get(banda) || { soma: 0, quantidade: 0 };
+    valores.soma += Number(album.media || 0);
+    valores.quantidade += 1;
+    bandasPorNota.set(banda, valores);
+  });
+  const favorita = [...bandasPorNota.entries()].map(([banda, dados]) => ({ banda, media: dados.soma / dados.quantidade }))
+    .sort((a, b) => b.media - a.media)[0];
+  const reproducoes = new Map();
+  registrosEstatisticas.forEach((registro) => {
+    const banda = String(registro.banda || 'Desconhecida').trim();
+    reproducoes.set(banda, (reproducoes.get(banda) || 0) + 1);
+  });
+  const maisOuvida = [...reproducoes.entries()].sort((a, b) => b[1] - a[1])[0];
+  const reaudicoes = new Map();
+  registrosEstatisticas.filter((registro) => registro.isReaudicao && !registro.isCaderno).forEach((registro) => {
+    const banda = String(registro.banda || 'Desconhecida').trim();
+    reaudicoes.set(banda, (reaudicoes.get(banda) || 0) + 1);
+  });
+  const maisReouvida = [...reaudicoes.entries()].sort((a, b) => b[1] - a[1])[0];
+  const posicoesFavoritas = new Map();
+  albunsFiltrados.forEach((album) => {
+    const posicao = Number(album.faixaFavoritaNumero) || (Array.isArray(album.faixas) ? album.faixas.findIndex((faixa) => faixa.favorita) + 1 : 0);
+    if (posicao > 0) posicoesFavoritas.set(posicao, (posicoesFavoritas.get(posicao) || 0) + 1);
+  });
+  const faixaMaisEscolhida = [...posicoesFavoritas.entries()].sort((a, b) => b[1] - a[1])[0];
+  document.getElementById('stat-banda-top').textContent = favorita ? `${favorita.banda} (${favorita.media.toFixed(2)}/10)` : '-';
+  document.getElementById('stat-banda-mais-ouvida').textContent = maisOuvida ? `${maisOuvida[0]} (${maisOuvida[1]} audições)` : '-';
+  document.getElementById('stat-banda-reaudicoes').textContent = maisReouvida ? `${maisReouvida[0]} (${maisReouvida[1]} ré-audições)` : '-';
+  document.getElementById('stat-faixa-favorita').textContent = faixaMaisEscolhida ? `Faixa ${faixaMaisEscolhida[0]} (${faixaMaisEscolhida[1]} vezes)` : '-';
+}
+
 function selecionarRegistrosUnicosPorAlbum(registros) {
   const unicos = new Map();
   const prioridade = (registro) => registro.isReaudicao ? 2 : registro.isCaderno ? 1 : 0;
@@ -3695,6 +4162,8 @@ async function carregarEstatisticas() {
   const filtro = document.getElementById('filtro-tipo-estatistica').value;
   const albuns = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro);
   renderizarGraficoAtividade(albuns);
+  renderizarGraficosEstatisticas(albuns);
+  atualizarMetricasBandas(albuns);
 
   document.getElementById('stat-total').innerText = albuns.length;
 
@@ -3702,6 +4171,9 @@ async function carregarEstatisticas() {
     document.getElementById('stat-melhor').innerText = '-';
     document.getElementById('stat-pior').innerText = '-';
     document.getElementById('stat-banda-top').innerText = '-';
+    document.getElementById('stat-banda-mais-ouvida').innerText = '-';
+    document.getElementById('stat-banda-reaudicoes').innerText = '-';
+    document.getElementById('stat-faixa-favorita').innerText = '-';
     document.getElementById('stat-banda-pior').innerText = '-';
     document.getElementById('stat-bandas-diferentes').innerText = '0';
     document.getElementById('stat-decada-media').innerText = '-';
@@ -3737,8 +4209,6 @@ async function carregarEstatisticas() {
     const b = a.banda ? a.banda.trim() : 'Desconhecida';
     contagemBandas[b] = (contagemBandas[b] || 0) + 1;
   });
-  const bandaTop = Object.keys(contagemBandas).reduce((a, b) => contagemBandas[a] > contagemBandas[b] ? a : b);
-  document.getElementById('stat-banda-top').innerText = `${bandaTop} (${contagemBandas[bandaTop]} álbuns)`;
   document.getElementById('stat-bandas-diferentes').innerText = Object.keys(contagemBandas).length;
 
   const totalFaixas = albuns.reduce((total, album) => total + (Array.isArray(album.faixas) ? album.faixas.length : 0), 0);
