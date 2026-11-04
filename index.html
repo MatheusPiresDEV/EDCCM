@@ -4,25 +4,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Avaliações de Álbuns | MusicBox</title>
+    <meta name="theme-color" content="#0b0b0a">
+    <meta name="description" content="Catálogo pessoal de álbuns e avaliações de rock e metal.">
+    <title>MusicBox | Catálogo de Rock e Metal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <!-- Chart.js para os gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <!-- FontAwesome / Ícones Web (Opcional, usando emojis nativos e SVGs limpos) -->
 </head>
 
 <body id="body-main">
 
     <!-- Canvas para Animações Interativas e Wallpaper de Fundo -->
-    <canvas id="canvas-bg"></canvas>
+    <canvas id="canvas-bg" aria-hidden="true"></canvas>
     
-    <!-- Elemento para Wallpaper em Imagem/Slide (com Fallback em Loop) -->
-    <div id="wallpaper-container" class="wallpaper-bg"></div>
-
     <!-- Mensagem de Feedback (Toast) -->
     <div id="toast" class="toast escondido"></div>
 
@@ -31,7 +29,7 @@
         <div class="lockscreen-content">
             <!-- Saudação Dinâmica e Relógio Centralizados -->
             <div class="lockscreen-header-center">
-                <h2 id="lock-saudacao" class="saudacao-texto">Boa noite! 🌙</h2>
+                <h2 id="lock-saudacao" class="saudacao-texto">Boa noite!</h2>
                 <h1 id="lock-hora" class="relogio-digital">00:00:00</h1>
                 <p id="lock-data" class="data-extenso">Carregando data...</p>
             </div>
@@ -96,7 +94,7 @@
             <span></span>
         </button>
 
-        <nav class="nav-menu" id="nav-menu">
+        <nav class="nav-menu" id="nav-menu" aria-label="Navegação principal">
             <button class="nav-btn active" data-target="sec-dashboard">
                 <span class="nav-text">Álbuns</span>
             </button>
@@ -256,7 +254,7 @@
                     <!-- Seção de Faixas / Músicas -->
                     <div class="secao-faixas">
                         <div class="faixas-header">
-                            <h3>🎵 Lista de Faixas e Notas</h3>
+                            <h3>Lista de Faixas e Notas</h3>
                             <strong id="nota-parcial-album" class="nota-parcial">Nota parcial: 0,0</strong>
                             <button type="button" id="btn-add-faixa" class="btn-secundario btn-sm">
                                 Adicionar Faixa
@@ -603,17 +601,23 @@
                 <div class="stats-controles">
                     <label class="stats-filtro-label" for="filtro-tipo-estatistica">Exibir</label>
                     <select id="filtro-tipo-estatistica" class="stats-filtro-select">
-                        <option value="geral">Geral (Tudo)</option>
+                        <option value="geral" selected>Geral (Tudo)</option>
                         <option value="ineditos">Apenas Inéditos</option>
                         <option value="caderno">Apenas Caderno Antigo</option>
                         <option value="reaudicoes">Apenas Ré-audições</option>
+                    </select>
+                    <label class="stats-filtro-label stats-banda-label" for="filtro-banda-estatistica">
+                        <span aria-hidden="true">♫</span> Banda
+                    </label>
+                    <select id="filtro-banda-estatistica" class="stats-filtro-select" aria-label="Selecionar banda para as estatísticas">
+                        <option value="*" selected>Todas as bandas</option>
                     </select>
                 </div>
             </div>
 
             <!-- Busca Rápida de Álbuns -->
             <div style="margin: 20px 0; max-width: 600px;">
-                <input type="text" id="busca-rapida-stats" placeholder="🔍 Buscar álbum ou banda..." 
+                <input type="text" id="busca-rapida-stats" placeholder="Buscar álbum ou banda..."
                        style="width: 100%; padding: 10px 15px; border-radius: 8px; border: 1px solid var(--line); 
                               background: rgba(15, 23, 42, 0.5); color: var(--text); font-size: 14px;">
                 <div id="resultado-busca-rapida" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div>
@@ -777,63 +781,41 @@
 
             <div class="grid-graficos">
                 <div class="container-grafico">
-                    <h3>Evolução por Banda (Ano x Nota)</h3>
+                    <div class="grafico-cabecalho-seletor">
+                        <h3>Evolução por Banda (Ano x Nota) — <span id="grafico-evolucao-banda-selecionada" aria-live="polite">Aguardando dados</span></h3>
+                        <select id="filtro-banda-evolucao" aria-label="Selecionar banda para o gráfico de evolução" disabled>
+                            <option value="*" selected>Todas</option>
+                        </select>
+                    </div>
                     <div class="canvas-wrapper"><canvas id="graficoEvolucaoBandas"></canvas></div>
                 </div>
                 <div class="container-grafico">
-                    <h3>Nota Média por Dia</h3>
-                    <div class="canvas-wrapper"><canvas id="graficoDispersaoNotasDia"></canvas></div>
+                    <h3>Nota x Ano de Lançamento (Todos os Álbuns)</h3>
+                    <p class="grafico-descricao">Cada ponto representa um álbum da seleção atual; passe o cursor para ver banda, ano e nota.</p>
+                    <div class="canvas-wrapper"><canvas id="graficoNotaAno"></canvas></div>
                 </div>
                 <div class="container-grafico ranking-albuns-secao">
                     <h3>Ranking dos Melhores Álbuns</h3>
+                    <p class="grafico-descricao">Resultados da seleção atual, ordenados por nota e paginados em grupos de cinco.</p>
                     <ol id="ranking-albuns" class="ranking-albuns"></ol>
-                </div>
-                <div class="container-grafico atividade-grafico">
-                    <div class="atividade-grafico-cabecalho">
-                        <h3>Atividade de Escutas</h3>
-                        <select id="filtro-periodo-atividade" aria-label="Agrupar atividade por período">
-                            <option value="mes">Mês</option>
-                            <option value="trimestre">Trimestre</option>
-                            <option value="ano">Ano</option>
-                            <option value="semana">Dia da Semana</option>
-                        </select>
-                    </div>
-                    <div class="canvas-wrapper"><canvas id="graficoAtividadeEscutas"></canvas></div>
-                </div>
-                <div class="container-grafico">
-                    <h3><span>📊</span> Comparativo de Bandas por Nota Média</h3>
-                    <div class="canvas-wrapper">
-                        <canvas id="graficoBandas"></canvas>
-                    </div>
-                </div>
-
-                <div class="container-grafico">
-                    <h3><span>🎯</span> Dispersão de Bandas (Álbuns x Nota Média)</h3>
-                    <div class="canvas-wrapper">
-                        <canvas id="graficoDispersaoBandas"></canvas>
-                    </div>
-                </div>
-
-                <div class="container-grafico">
-                    <h3><span>📊</span> Média de Notas por Década de Lançamento</h3>
-                    <div class="canvas-wrapper">
-                        <canvas id="graficoDecadas"></canvas>
-                    </div>
-                </div>
-
-                <div class="container-grafico">
-                    <h3><span>📈</span> Nota x Ano de Lançamento (Todos os Álbuns)</h3>
-                    <div class="canvas-wrapper">
-                        <canvas id="graficoCorrelacao"></canvas>
+                    <div class="stats-paginacao escondido" id="paginacao-ranking" aria-label="Paginação do ranking">
+                        <button type="button" class="btn-secundario btn-sm" id="ranking-anterior" aria-label="Página anterior do ranking">‹ Anterior</button>
+                        <span id="ranking-pagina-info" aria-live="polite">Página 1 de 1</span>
+                        <button type="button" class="btn-secundario btn-sm" id="ranking-proxima" aria-label="Próxima página do ranking">Próxima ›</button>
                     </div>
                 </div>
             </div>
 
             <!-- Histórico de Avaliações / Timeline -->
-            <div class="container-grafico" style="margin-top: 40px;">
-                <h3><span>⏰</span> Histórico de Avaliações (Últimas Adições)</h3>
-                <div id="timeline-albuns" style="max-height: 600px; overflow-y: auto;">
+            <div class="container-grafico timeline-estatisticas">
+                <h3>Histórico de Avaliações (Últimas Adições)</h3>
+                <div id="timeline-albuns">
                     <!-- Preenchido dinamicamente -->
+                </div>
+                <div class="stats-paginacao escondido" id="paginacao-timeline" aria-label="Paginação do histórico">
+                    <button type="button" class="btn-secundario btn-sm" id="timeline-anterior" aria-label="Página anterior do histórico">Anterior</button>
+                    <span id="timeline-pagina-info" aria-live="polite">Página 1 de 1</span>
+                    <button type="button" class="btn-secundario btn-sm" id="timeline-proxima" aria-label="Próxima página do histórico">Próxima</button>
                 </div>
             </div>
         </section>

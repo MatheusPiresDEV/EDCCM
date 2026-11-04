@@ -19,7 +19,22 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-if (typeof Chart !== 'undefined') Chart.defaults.devicePixelRatio = window.devicePixelRatio || 1;
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.devicePixelRatio = window.devicePixelRatio || 1;
+  Chart.defaults.color = '#b7b2a8';
+  Chart.defaults.font.family = "'DM Sans', sans-serif";
+  Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(17, 16, 15, 0.96)';
+  Chart.defaults.plugins.tooltip.borderColor = 'rgba(191, 145, 78, 0.34)';
+  Chart.defaults.plugins.tooltip.borderWidth = 1;
+  Chart.defaults.plugins.tooltip.titleColor = '#f1eadc';
+  Chart.defaults.plugins.tooltip.bodyColor = '#d1c9ba';
+  Chart.defaults.plugins.tooltip.padding = 12;
+  Chart.defaults.plugins.tooltip.cornerRadius = 9;
+  Chart.defaults.plugins.tooltip.displayColors = true;
+  Chart.defaults.plugins.tooltip.boxPadding = 5;
+  Chart.defaults.plugins.legend.labels.color = '#c9c2b5';
+  Chart.defaults.plugins.legend.labels.padding = 18;
+}
 
 // LISTA DE FRASES PARA A LOCKSCREEN
 const FRASES = [
@@ -191,244 +206,349 @@ if (btnVoltarLock) {
   });
 }
 
-// WALLPAPER REATIVO AO HORÁRIO E INTERATIVO (CANVAS)
+// CENÁRIO ORIGINAL ANIMADO: MONTANHA, FUMAÇA E ATIVIDADE VULCÂNICA
 const canvas = document.getElementById('canvas-bg');
 const ctx = canvas.getContext('2d');
 let mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+let particulas = [];
+let larguraCanvas = window.innerWidth;
+let alturaCanvas = window.innerHeight;
+const movimentoReduzido = window.matchMedia('(prefers-reduced-motion: reduce)');
+let ultimaFrameFundo = 0;
+const intervaloFrameFundo = 1000 / 30;
+const pontosMontanha = [
+  [0, 0.77], [0.09, 0.72], [0.17, 0.75], [0.29, 0.57], [0.37, 0.61],
+  [0.49, 0.28], [0.55, 0.4], [0.63, 0.35], [0.73, 0.59], [0.82, 0.63],
+  [0.91, 0.57], [1, 0.7], [1, 1], [0, 1]
+];
 
 window.addEventListener('mousemove', (e) => {
   mouse.x = e.clientX;
   mouse.y = e.clientY;
 });
 
+function criarParticulas() {
+  const quantidade = window.innerWidth < 680 ? 70 : 150;
+  particulas = Array.from({ length: quantidade }, () => ({
+    x: Math.random() * larguraCanvas,
+    y: Math.random() * alturaCanvas,
+    raio: Math.random() * 2 + 0.5,
+    velocidadeX: (Math.random() - 0.5) * 0.42,
+    velocidadeY: Math.random() * 0.42 + 0.12,
+    fase: Math.random() * Math.PI * 2,
+    intensidade: Math.random() * 0.58 + 0.18
+  }));
+}
+
 function redimensionarCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  const escala = Math.min(window.devicePixelRatio || 1, 2);
+  larguraCanvas = window.innerWidth;
+  alturaCanvas = window.innerHeight;
+  canvas.width = Math.round(larguraCanvas * escala);
+  canvas.height = Math.round(alturaCanvas * escala);
+  ctx.setTransform(escala, 0, 0, escala, 0, 0);
+  criarParticulas();
 }
 window.addEventListener('resize', redimensionarCanvas);
 redimensionarCanvas();
-
-// PARTÍCULAS INTERATIVAS DO WALLPAPER
-const particulas = Array.from({ length: 90 }, () => ({
-  x: Math.random() * window.innerWidth,
-  y: Math.random() * window.innerHeight,
-  raio: Math.random() * 2.4 + 0.8,
-  vx: (Math.random() - 0.5) * 0.6,
-  vy: (Math.random() - 0.5) * 0.6,
-  brilho: Math.random() * 0.8 + 0.2
-}));
-
-function interpolar(inicio, fim, fator) {
-  return inicio + (fim - inicio) * fator;
-}
 
 function obterCenaDoDia() {
   const agora = new Date();
   const hora = agora.getHours() + agora.getMinutes() / 60;
 
-  if (hora >= 5 && hora < 8) return 'nascer';
-  if (hora >= 8 && hora < 16) return 'dia';
-  if (hora >= 16 && hora < 20) return 'por-do-sol';
-  return 'noite';
+  if (hora >= 5 && hora < 12) {
+    return { nome: 'manha', vulcanismo: 0, fratura: 0, calor: 0, paleta: ['#14202a', '#26313a', '#c4c9c4'] };
+  }
+  if (hora >= 12 && hora < 18) {
+    const progresso = (hora - 12) / 6;
+    return {
+      nome: 'tarde',
+      vulcanismo: 0.12 + progresso * 0.54,
+      fratura: 0.18 + progresso * 0.82,
+      calor: 0.18 + progresso * 0.58,
+      paleta: ['#211d1a', '#3a3028', '#d2a266']
+    };
+  }
+  if (hora >= 18 && hora < 22) {
+    const progresso = (hora - 18) / 4;
+    return {
+      nome: 'noite',
+      vulcanismo: 0.74 + progresso * 0.2,
+      fratura: 1,
+      calor: 0.86 + progresso * 0.1,
+      paleta: ['#100f12', '#27191a', '#df7045']
+    };
+  }
+  return {
+    nome: 'madrugada',
+    vulcanismo: 1,
+    fratura: 1,
+    calor: 1,
+    paleta: ['#090c12', '#191416', '#d65b38']
+  };
 }
 
-function animarFundo() {
-  const agora = new Date();
-  const hora = agora.getHours() + agora.getMinutes() / 60;
-  const cena = obterCenaDoDia();
-  const larg = canvas.width;
-  const alt = canvas.height;
-  const pontoFugaX = larg * (0.5 + (mouse.x / larg - 0.5) * 0.18);
-  const pontoFugaY = alt * (0.44 + (mouse.y / alt - 0.5) * 0.1);
+function desenharMontanha(largura, altura, tempo, cena, parallaxX, parallaxY) {
+  const deslocamento = largura * 0.012;
+  const baseY = altura * 0.12;
+  const montanha = ctx.createLinearGradient(0, altura * 0.22, 0, altura);
+  montanha.addColorStop(0, cena.nome === 'manha' ? '#3d4a52' : '#302a27');
+  montanha.addColorStop(0.52, cena.nome === 'manha' ? '#252f36' : '#211b19');
+  montanha.addColorStop(1, '#111111');
 
-  ctx.clearRect(0, 0, larg, alt);
-
-  let topo1, topo2, meio1, meio2, solCor, solX, solY, solRaio, horizonte, nuvem, estrela, montanha1, montanha2, montanha3;
-
-  if (cena === 'nascer') {
-    topo1 = '#081f3f';
-    topo2 = '#2d5b88';
-    meio1 = '#f7b267';
-    meio2 = '#f9d976';
-    solCor = '#fff2b3';
-    solX = larg * 0.3 + (hora - 5) * larg * 0.1;
-    solY = alt * (0.78 - (hora - 5) * 0.1);
-    solRaio = 48;
-    horizonte = '#f4c77d';
-    nuvem = 'rgba(255, 245, 220, 0.14)';
-    estrela = 'rgba(255, 239, 197, 0.18)';
-    montanha1 = '#1d3557';
-    montanha2 = '#0f2542';
-    montanha3 = '#0b1b2f';
-  } else if (cena === 'dia') {
-    topo1 = '#62b6ff';
-    topo2 = '#d7f1ff';
-    meio1 = '#8bd4ff';
-    meio2 = '#f6fbff';
-    solCor = '#ffe38a';
-    solX = larg * (0.18 + (hora - 8) / 8 * 0.64);
-    solY = alt * 0.28;
-    solRaio = 42;
-    horizonte = '#a5d8ff';
-    nuvem = 'rgba(255, 255, 255, 0.18)';
-    estrela = 'rgba(255, 255, 255, 0.06)';
-    montanha1 = '#4a6f8a';
-    montanha2 = '#3a536e';
-    montanha3 = '#243a4d';
-  } else if (cena === 'por-do-sol') {
-    topo1 = '#2d1b4a';
-    topo2 = '#ef6f6c';
-    meio1 = '#ff9f43';
-    meio2 = '#ffd166';
-    solCor = '#ffcf70';
-    solX = larg * (0.72 - (hora - 16) / 4 * 0.42);
-    solY = alt * (0.34 + (hora - 16) / 4 * 0.14);
-    solRaio = 54;
-    horizonte = '#ff8a5b';
-    nuvem = 'rgba(255, 214, 160, 0.14)';
-    estrela = 'rgba(255, 255, 255, 0.08)';
-    montanha1 = '#4c3259';
-    montanha2 = '#2d2240';
-    montanha3 = '#1b1a2f';
-  } else {
-    topo1 = '#020b1a';
-    topo2 = '#112942';
-    meio1 = '#1f3a5f';
-    meio2 = '#3f5d8a';
-    solCor = '#dfe9ff';
-    solX = larg * 0.7;
-    solY = alt * 0.32;
-    solRaio = 38;
-    horizonte = '#7e9cc7';
-    nuvem = 'rgba(180, 210, 255, 0.08)';
-    estrela = 'rgba(255, 255, 255, 0.45)';
-    montanha1 = '#13263f';
-    montanha2 = '#0e1f34';
-    montanha3 = '#081523';
-  }
-
-  const gradiente = ctx.createLinearGradient(0, 0, 0, alt);
-  gradiente.addColorStop(0, topo1);
-  gradiente.addColorStop(0.5, meio1);
-  gradiente.addColorStop(1, topo2);
-  ctx.fillStyle = gradiente;
-  ctx.fillRect(0, 0, larg, alt);
-
-  const gradienteSol = ctx.createRadialGradient(solX, solY, 10, solX, solY, solRaio * 3.5);
-  gradienteSol.addColorStop(0, 'rgba(255,255,255,0.9)');
-  gradienteSol.addColorStop(0.18, solCor);
-  gradienteSol.addColorStop(0.55, 'rgba(255,170,90,0.25)');
-  gradienteSol.addColorStop(1, 'rgba(255,170,90,0)');
-  ctx.fillStyle = gradienteSol;
+  ctx.save();
+  ctx.translate(parallaxX, parallaxY);
   ctx.beginPath();
-  ctx.arc(solX, solY, solRaio * 3.5, 0, Math.PI * 2);
+  pontosMontanha.forEach(([x, y], indice) => {
+    const px = x * largura + (x - 0.5) * deslocamento;
+    const py = y * altura + baseY;
+    if (indice === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  });
+  ctx.closePath();
+  ctx.fillStyle = montanha;
   ctx.fill();
 
-  ctx.fillStyle = solCor;
-  ctx.beginPath();
-  ctx.arc(solX, solY, solRaio, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  const facetas = [
+    [[0.08, 0.78], [0.29, 0.57], [0.4, 0.76], [0.34, 1], [0.08, 1]],
+    [[0.29, 0.57], [0.49, 0.28], [0.53, 0.63], [0.4, 0.76]],
+    [[0.49, 0.28], [0.63, 0.35], [0.73, 0.59], [0.57, 0.74], [0.53, 0.63]],
+    [[0.63, 0.35], [0.91, 0.57], [0.82, 0.8], [0.73, 0.59]]
+  ];
+  facetas.forEach((pontos, indice) => {
+    ctx.beginPath();
+    pontos.forEach(([x, y], ponto) => {
+      const px = x * largura + (x - 0.5) * deslocamento;
+      const py = y * altura + baseY;
+      if (ponto === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fillStyle = indice % 2 === 0 ? 'rgba(177, 181, 178, 0.055)' : 'rgba(8, 9, 10, 0.24)';
+    ctx.fill();
+  });
 
-  if (cena === 'noite') {
-    particulas.forEach((p, index) => {
-      const estrelaX = (p.x + (index * 17)) % larg;
-      const estrelaY = (p.y + (index * 13)) % (alt * 0.7);
-      ctx.fillStyle = `rgba(255,255,255,${p.brilho})`;
+  ctx.strokeStyle = `rgba(207, 204, 190, ${0.08 + cena.fratura * 0.12})`;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(largura * 0.49, altura * 0.31 + baseY);
+  ctx.lineTo(largura * 0.44, altura * 0.43 + baseY);
+  ctx.lineTo(largura * 0.46, altura * 0.52 + baseY);
+  ctx.lineTo(largura * 0.4, altura * 0.63 + baseY);
+  ctx.moveTo(largura * 0.63, altura * 0.38 + baseY);
+  ctx.lineTo(largura * 0.59, altura * 0.51 + baseY);
+  ctx.lineTo(largura * 0.64, altura * 0.59 + baseY);
+  ctx.lineTo(largura * 0.61, altura * 0.73 + baseY);
+  ctx.moveTo(largura * 0.32, altura * 0.59 + baseY);
+  ctx.lineTo(largura * 0.36, altura * 0.69 + baseY);
+  ctx.lineTo(largura * 0.31, altura * 0.79 + baseY);
+  ctx.stroke();
+  ctx.restore();
+
+  if (cena.fratura > 0) {
+    const fragmentos = [
+      [0.36, 0.63], [0.4, 0.69], [0.43, 0.58], [0.57, 0.51],
+      [0.61, 0.58], [0.67, 0.55], [0.72, 0.64], [0.31, 0.68],
+      [0.54, 0.65], [0.77, 0.68], [0.46, 0.74], [0.64, 0.73]
+    ];
+    fragmentos.forEach(([x, y], indice) => {
+      const fase = tempo * (0.18 + (indice % 4) * 0.025) + indice * 2.2;
+      const desvio = Math.sin(fase) * largura * 0.012 * cena.fratura;
+      const queda = ((tempo * 0.012 + indice * 0.09) % 0.045) * altura * cena.fratura;
+      const centroX = x * largura + desvio;
+      const centroY = y * altura + baseY + queda;
+      const tamanho = (2 + (indice % 4)) * (0.65 + cena.fratura * 0.55);
+      ctx.save();
+      ctx.translate(centroX, centroY);
+      ctx.rotate(fase);
       ctx.beginPath();
-      ctx.arc(estrelaX, estrelaY, p.raio, 0, Math.PI * 2);
+      ctx.moveTo(-tamanho, -tamanho * 0.6);
+      ctx.lineTo(tamanho * 0.8, -tamanho);
+      ctx.lineTo(tamanho, tamanho * 0.55);
+      ctx.lineTo(-tamanho * 0.35, tamanho);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(125, 112, 101, ${cena.fratura * 0.48})`;
       ctx.fill();
+      ctx.restore();
     });
   }
 
-  for (let i = 0; i < 6; i++) {
-    const desloc = (Date.now() * 0.02 + i * 160) % (larg + 260);
-    const nuvemY = alt * (0.18 + i * 0.05) + (mouse.y - alt / 2) * 0.03;
-    ctx.fillStyle = nuvem;
+  const intensidadeLava = cena.vulcanismo;
+  if (intensidadeLava > 0) {
+    const rotasLava = [
+      [[0.49, 0.31], [0.46, 0.43], [0.48, 0.51], [0.43, 0.63], [0.45, 0.77], [0.4, 0.94]],
+      [[0.51, 0.32], [0.55, 0.44], [0.53, 0.53], [0.59, 0.65], [0.57, 0.76], [0.64, 0.95]],
+      [[0.51, 0.33], [0.5, 0.47], [0.46, 0.56], [0.48, 0.69], [0.45, 0.82], [0.48, 0.96]],
+      [[0.52, 0.34], [0.59, 0.46], [0.62, 0.56], [0.68, 0.67], [0.7, 0.83]]
+    ];
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(desloc - 120, nuvemY, 42, 0, Math.PI * 2);
-    ctx.arc(desloc - 70, nuvemY - 18, 50, 0, Math.PI * 2);
-    ctx.arc(desloc - 20, nuvemY, 58, 0, Math.PI * 2);
-    ctx.arc(desloc + 40, nuvemY - 12, 48, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.rect(0, altura * 0.26 + baseY, largura, altura);
+    ctx.clip();
+    rotasLava.forEach((rota, indice) => {
+      const pulso = 0.74 + Math.sin(tempo * 1.8 + indice * 1.7) * 0.18;
+      ctx.beginPath();
+      rota.forEach(([x, y], ponto) => {
+        const px = x * largura + (x - 0.5) * deslocamento;
+        const py = y * altura + baseY;
+        if (ponto === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.globalAlpha = intensidadeLava * pulso;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowColor = '#f05a2a';
+      ctx.shadowBlur = 24 * intensidadeLava;
+      ctx.strokeStyle = '#e84926';
+      ctx.lineWidth = 8 * intensidadeLava + 1;
+      ctx.stroke();
+      ctx.shadowBlur = 5 * intensidadeLava;
+      ctx.strokeStyle = '#ffc66f';
+      ctx.lineWidth = 2.2 * intensidadeLava;
+      ctx.stroke();
+      ctx.setLineDash([6, 18]);
+      ctx.lineDashOffset = -tempo * (18 + indice * 7);
+      ctx.strokeStyle = '#ffe4a0';
+      ctx.lineWidth = 2.4 * intensidadeLava;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    ctx.restore();
   }
 
-  const horizonteBase = alt * 0.72;
+  const centroCrateraX = largura * 0.5 + parallaxX;
+  const centroCrateraY = altura * 0.31 + baseY + parallaxY;
+  const larguraCratera = largura * (0.06 + intensidadeLava * 0.025);
+  const alturaCratera = altura * 0.018;
+  const brilhoCratera = ctx.createRadialGradient(centroCrateraX, centroCrateraY, 1, centroCrateraX, centroCrateraY, larguraCratera * 1.8);
+  brilhoCratera.addColorStop(0, `rgba(255, 139, 57, ${0.16 + intensidadeLava * 0.52})`);
+  brilhoCratera.addColorStop(1, 'rgba(255, 82, 35, 0)');
+  ctx.fillStyle = brilhoCratera;
+  ctx.fillRect(centroCrateraX - larguraCratera * 2, centroCrateraY - larguraCratera * 2, larguraCratera * 4, larguraCratera * 4);
   ctx.beginPath();
-  ctx.moveTo(0, alt);
-  ctx.lineTo(0, horizonteBase);
-  ctx.lineTo(larg * 0.15, horizonteBase - 40);
-  ctx.lineTo(larg * 0.32, horizonteBase + 5);
-  ctx.lineTo(larg * 0.45, horizonteBase - 60);
-  ctx.lineTo(larg * 0.62, horizonteBase + 8);
-  ctx.lineTo(larg * 0.8, horizonteBase - 45);
-  ctx.lineTo(larg, horizonteBase);
-  ctx.lineTo(larg, alt);
-  ctx.closePath();
-  ctx.fillStyle = montanha1;
+  ctx.ellipse(centroCrateraX, centroCrateraY, larguraCratera, alturaCratera, 0, 0, Math.PI * 2);
+  ctx.fillStyle = cena.nome === 'manha' ? 'rgba(8, 11, 13, 0.72)' : '#0a0808';
   ctx.fill();
-
   ctx.beginPath();
-  ctx.moveTo(0, alt);
-  ctx.lineTo(0, horizonteBase + 10);
-  ctx.lineTo(larg * 0.2, horizonteBase - 20);
-  ctx.lineTo(larg * 0.36, horizonteBase + 16);
-  ctx.lineTo(larg * 0.52, horizonteBase - 80);
-  ctx.lineTo(larg * 0.7, horizonteBase + 28);
-  ctx.lineTo(larg * 0.87, horizonteBase - 30);
-  ctx.lineTo(larg, horizonteBase + 14);
-  ctx.lineTo(larg, alt);
-  ctx.closePath();
-  ctx.fillStyle = montanha2;
+  ctx.ellipse(centroCrateraX, centroCrateraY + alturaCratera * 0.18, larguraCratera * 0.65, alturaCratera * 0.42, 0, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255, 102, 43, ${intensidadeLava * (0.38 + Math.sin(tempo * 2) * 0.12)})`;
   ctx.fill();
+  ctx.restore();
+}
 
-  ctx.beginPath();
-  ctx.moveTo(0, alt);
-  ctx.lineTo(0, horizonteBase + 80);
-  ctx.lineTo(larg * 0.14, horizonteBase + 50);
-  ctx.lineTo(larg * 0.26, horizonteBase + 95);
-  ctx.lineTo(larg * 0.45, horizonteBase + 40);
-  ctx.lineTo(larg * 0.64, horizonteBase + 110);
-  ctx.lineTo(larg * 0.82, horizonteBase + 46);
-  ctx.lineTo(larg, horizonteBase + 75);
-  ctx.lineTo(larg, alt);
-  ctx.closePath();
-  ctx.fillStyle = montanha3;
-  ctx.fill();
+function desenharFumaca(largura, altura, tempo, intensidade) {
+  if (intensidade <= 0) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (let indice = 0; indice < 7; indice++) {
+    const fase = tempo * (0.34 + indice * 0.015) + indice * 1.45;
+    const x = largura * (0.49 + Math.sin(fase) * (0.018 + indice * 0.002));
+    const y = altura * (0.29 - ((tempo * 0.022 + indice * 0.13) % 0.46));
+    const larguraFumaca = largura * (0.035 + indice * 0.005);
+    ctx.beginPath();
+    ctx.moveTo(x, altura * 0.32);
+    ctx.bezierCurveTo(
+      x - larguraFumaca * 0.8, y + altura * 0.13,
+      x + larguraFumaca * 0.8, y + altura * 0.08,
+      x + Math.sin(fase + 1) * larguraFumaca, y
+    );
+    ctx.strokeStyle = `rgba(125, 119, 111, ${intensidade * (0.028 + (indice % 3) * 0.012)})`;
+    ctx.lineWidth = 8 + indice * 3;
+    ctx.shadowColor = 'rgba(130, 113, 96, 0.12)';
+    ctx.shadowBlur = 20;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
-  ctx.beginPath();
-  ctx.moveTo(0, alt);
-  ctx.lineTo(0, alt * 0.9);
-  ctx.lineTo(larg * 0.25, alt * 0.86);
-  ctx.lineTo(larg * 0.5, alt * 0.9);
-  ctx.lineTo(larg * 0.75, alt * 0.88);
-  ctx.lineTo(larg, alt * 0.92);
-  ctx.lineTo(larg, alt);
-  ctx.closePath();
-  ctx.fillStyle = horizonte;
-  ctx.globalAlpha = 0.75;
-  ctx.fill();
-  ctx.globalAlpha = 1;
+function animarFundo(timestamp = performance.now()) {
+  if (movimentoReduzido.matches || document.hidden) return;
+  if (timestamp - ultimaFrameFundo < intervaloFrameFundo) {
+    requestAnimationFrame(animarFundo);
+    return;
+  }
+  ultimaFrameFundo = timestamp;
 
-  const linhaFuga = ctx.createLinearGradient(pontoFugaX - 120, pontoFugaY, pontoFugaX + 120, pontoFugaY);
-  linhaFuga.addColorStop(0, 'rgba(255,255,255,0)');
-  linhaFuga.addColorStop(0.5, 'rgba(255,255,255,0.2)');
-  linhaFuga.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.strokeStyle = linhaFuga;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, pontoFugaY);
-  ctx.lineTo(larg, pontoFugaY);
-  ctx.stroke();
+  const cena = obterCenaDoDia();
+  const larg = larguraCanvas;
+  const alt = alturaCanvas;
+  const tempo = performance.now() * 0.001;
+  const paleta = cena.paleta;
+  const focoX = larg * (0.5 + (mouse.x / Math.max(larg, 1) - 0.5) * 0.06);
+  const focoY = alt * (0.42 + (mouse.y / Math.max(alt, 1) - 0.5) * 0.04);
 
-  const linhaHorizonte = ctx.createLinearGradient(0, horizonteBase, 0, alt);
-  linhaHorizonte.addColorStop(0, 'rgba(255,255,255,0)');
-  linhaHorizonte.addColorStop(1, 'rgba(12, 18, 30, 0.38)');
-  ctx.fillStyle = linhaHorizonte;
-  ctx.fillRect(0, horizonteBase, larg, alt - horizonteBase);
+  ctx.clearRect(0, 0, larg, alt);
+  const ceu = ctx.createLinearGradient(0, 0, 0, alt);
+  ceu.addColorStop(0, paleta[0]);
+  ceu.addColorStop(0.55, paleta[1]);
+  ceu.addColorStop(1, '#10100f');
+  ctx.fillStyle = ceu;
+  ctx.fillRect(0, 0, larg, alt);
+
+  const luz = ctx.createRadialGradient(focoX, focoY, 0, focoX, focoY, Math.max(larg, alt) * 0.75);
+  luz.addColorStop(0, cena.nome === 'manha' ? 'rgba(142, 165, 177, 0.2)' : `rgba(214, 87, 47, ${0.04 + cena.calor * 0.15})`);
+  luz.addColorStop(1, 'rgba(7, 8, 10, 0)');
+  ctx.fillStyle = luz;
+  ctx.fillRect(0, 0, larg, alt);
+
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = paleta[2];
+  for (let indice = 0; indice < 38; indice++) {
+    const x = ((indice * 197 + tempo * (2 + (indice % 4))) % (larg + 20)) - 10;
+    const y = (indice * 83) % Math.max(alt * 0.72, 1);
+    ctx.fillRect(x, y, (indice % 3) + 1, (indice % 3) + 1);
+  }
+  ctx.restore();
+
+  const parallaxX = (mouse.x / Math.max(larg, 1) - 0.5) * 14;
+  const parallaxY = (mouse.y / Math.max(alt, 1) - 0.5) * 8;
+  desenharMontanha(larg, alt, tempo, cena, parallaxX, parallaxY);
+  desenharFumaca(larg, alt, tempo, Math.max(cena.fratura * 0.35, cena.vulcanismo));
+
+  particulas.forEach((particula) => {
+    const brasa = cena.vulcanismo > 0.12 && particula.y > alt * 0.24;
+    particula.x += particula.velocidadeX + Math.sin(tempo + particula.fase) * 0.12;
+    particula.y += brasa ? -particula.velocidadeY * (0.8 + cena.vulcanismo) : particula.velocidadeY * 0.16;
+    if (particula.x < -5) particula.x = larg + 5;
+    if (particula.x > larg + 5) particula.x = -5;
+    if (particula.y < -8) {
+      particula.y = alt + Math.random() * alt * 0.2;
+      particula.x = larg * (0.35 + Math.random() * 0.3);
+    }
+    if (!brasa && particula.y > alt + 8) particula.y = -5;
+
+    const parallaxParticulaX = (mouse.x / Math.max(larg, 1) - 0.5) * 12;
+    const parallaxParticulaY = (mouse.y / Math.max(alt, 1) - 0.5) * 8;
+    const brilho = particula.intensidade * (brasa ? cena.vulcanismo : 0.42);
+    ctx.beginPath();
+    ctx.fillStyle = brasa ? `rgba(255, ${Math.floor(116 + particula.intensidade * 80)}, 61, ${brilho})` : `rgba(194, 193, 184, ${brilho})`;
+    ctx.shadowColor = brasa ? '#ff673b' : 'transparent';
+    ctx.shadowBlur = brasa ? particula.raio * 5 : 0;
+    ctx.arc(particula.x + parallaxParticulaX, particula.y + parallaxParticulaY, particula.raio * (brasa ? 1.3 : 1), 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(8, 9, 10, 0.24)';
+  ctx.fillRect(0, alt * 0.82, larg, alt * 0.18);
 
   requestAnimationFrame(animarFundo);
 }
-animarFundo();
+requestAnimationFrame(animarFundo);
+movimentoReduzido.addEventListener?.('change', () => {
+  if (!movimentoReduzido.matches && !document.hidden) {
+    ultimaFrameFundo = 0;
+    requestAnimationFrame(animarFundo);
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !movimentoReduzido.matches) {
+    ultimaFrameFundo = 0;
+    requestAnimationFrame(animarFundo);
+  }
+});
 
 // REGRAS DO SISTEMA DE ÁLBUNS E FIREBASE
 const PESO_NOTAS = {
@@ -445,8 +565,6 @@ function calcularIdade(dataBase = new Date()) {
 
 let usuarioAtual = null;
 let perfilUsuarioAtual = null;
-let meuGrafico = null;
-let graficoDecadasChart = null;
 let adminChart = null;
 let leituraStatusChart = null;
 let leituraEditoraChart = null;
@@ -475,10 +593,15 @@ let reaudicaoAlbumOriginal = null;
 let reaudicaoEditandoId = null;
 let reaudicaoEvolucaoChart = null;
 let reaudicaoComparacaoChart = null;
-let graficoAtividadeEscutas = null;
 let graficoEvolucaoBandas = null;
-let graficoNotasDia = null;
+let graficoNotaAno = null;
 let registrosEstatisticas = [];
+let albunsEvolucaoDisponiveis = [];
+let bandaEvolucaoSelecionada = null;
+let paginaRankingAtual = 1;
+let paginaTimelineAtual = 1;
+const ALBUNS_POR_PAGINA_RANKING = 5;
+const ALBUNS_POR_PAGINA_TIMELINE = 15;
 let timerAudicaoSegundos = 0;
 let timerAudicaoIntervalo = null;
 let timerAudicaoId = null;
@@ -487,26 +610,6 @@ let timerAudicaoIniciadoEm = null;
 const ITENS_POR_PAGINA = 12;
 const ADMIN_EMAILS = ['matheusgustavodasilvapires@gmail.com'];
 const PERFIL_USERS_COLLECTION = 'usuarios';
-
-function ajustarAlturaCanvas(canvas, totalItens, minHeight = 300, alturaPorItem = 42, maxHeight = 620, minWidth = 720) {
-  if (!canvas) return;
-
-  const wrapper = canvas.closest('.canvas-wrapper');
-  const alturaDinamica = Math.min(Math.max(minHeight, totalItens * alturaPorItem), maxHeight);
-  const larguraDinamica = Math.max(minWidth, totalItens * 18);
-
-  canvas.style.height = `${alturaDinamica}px`;
-  canvas.style.minHeight = `${alturaDinamica}px`;
-  canvas.style.width = `${larguraDinamica}px`;
-  canvas.style.minWidth = `${larguraDinamica}px`;
-
-  if (wrapper) {
-    wrapper.style.height = `${alturaDinamica}px`;
-    wrapper.style.maxHeight = `${maxHeight}px`;
-    wrapper.style.minWidth = '100%';
-    wrapper.scrollLeft = 0;
-  }
-}
 
 function normalizarEmail(email = '') {
   return (email || '').trim().toLowerCase();
@@ -3021,7 +3124,7 @@ function addLinhaFaixa(nome = '', nota = 'Boa', opcoes = {}) {
   const div = document.createElement('div');
   div.className = 'linha-faixa';
   const nomeInicial = nome || `Faixa ${containerFaixas.children.length + 1}`;
-  const urlDownload = normalizarUrlDownload(opcoes.downloadUrl || '');
+  const downloadMarcado = Boolean(opcoes.baixar || opcoes.downloadUrl);
   const favoritaInicial = Boolean(opcoes.favorita) && !containerFaixas.querySelector('.faixa-favorita:checked');
   const ehNomePadrao = !nome || /^Faixa \d+$/.test(nomeInicial);
   div.dataset.nomePadrao = ehNomePadrao ? 'true' : 'false';
@@ -3034,8 +3137,10 @@ function addLinhaFaixa(nome = '', nota = 'Boa', opcoes = {}) {
     <div class="faixa-opcoes">
       <label><input type="checkbox" class="faixa-favorita" ${favoritaInicial ? 'checked' : ''}> Favorita</label>
       <label><input type="checkbox" class="faixa-desconsiderar" ${opcoes.desconsiderarMedia ? 'checked' : ''}> Desconsiderar da média</label>
-      <input type="url" class="faixa-download" value="${escaparHtml(urlDownload)}" placeholder="URL para download (opcional)" aria-label="URL para download">
-      <a class="faixa-download-link ${urlDownload ? '' : 'escondido'}" href="${escaparHtml(urlDownload || '#')}" download target="_blank" rel="noopener">Baixar faixa</a>
+      <label class="faixa-download-toggle">
+        <input type="checkbox" class="faixa-download" ${downloadMarcado ? 'checked' : ''}>
+        <span>Baixar música / Marcar para download</span>
+      </label>
     </div>
   `;
   div.querySelector('.faixa-nome').addEventListener('input', (event) => {
@@ -3048,26 +3153,10 @@ function addLinhaFaixa(nome = '', nota = 'Boa', opcoes = {}) {
       });
     }
   });
-  div.querySelector('.faixa-download').addEventListener('input', (event) => {
-    const link = div.querySelector('.faixa-download-link');
-    const url = normalizarUrlDownload(event.target.value);
-    link.href = url || '#';
-    link.classList.toggle('escondido', !url);
-    event.target.setCustomValidity(event.target.value.trim() && !url ? 'Informe uma URL HTTP ou HTTPS válida.' : '');
-  });
   containerFaixas.appendChild(div);
   div.addEventListener('input', atualizarNotaParcialAlbum);
   div.addEventListener('change', atualizarNotaParcialAlbum);
   atualizarNotaParcialAlbum();
-}
-
-function normalizarUrlDownload(valor) {
-  try {
-    const url = new URL(String(valor || '').trim());
-    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
-  } catch {
-    return '';
-  }
 }
 
 function atualizarNotaParcialAlbum() {
@@ -3137,12 +3226,12 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       if (!fNome) fNome = `Faixa ${index + 1}`;
       const desconsiderarMedia = el.querySelector('.faixa-desconsiderar').checked;
       const faixaFavorita = el.querySelector('.faixa-favorita').checked;
-      const downloadUrl = normalizarUrlDownload(el.querySelector('.faixa-download').value);
+      const baixar = el.querySelector('.faixa-download').checked;
       if (!desconsiderarMedia) {
         somaNotas += PESO_NOTAS[fNota];
         quantidadeFaixasValidas += 1;
       }
-      faixas.push({ nome: fNome, classificacao: fNota, favorita: faixaFavorita, desconsiderarMedia, downloadUrl });
+      faixas.push({ nome: fNome, classificacao: fNota, favorita: faixaFavorita, desconsiderarMedia, baixar });
     });
 
     if (faixas.length === 0) {
@@ -3909,144 +3998,283 @@ function atualizarMetricasAudicao(albuns) {
   if (elementos.correlacao) elementos.correlacao.textContent = `${leitura} (r = ${correlacao.toFixed(2)})`;
 }
 
-function renderizarGraficoAtividade(registros) {
-  const canvas = document.getElementById('graficoAtividadeEscutas');
-  const agrupamento = document.getElementById('filtro-periodo-atividade')?.value || 'mes';
-  if (!canvas || typeof Chart === 'undefined') return;
-  if (graficoAtividadeEscutas) {
-    graficoAtividadeEscutas.destroy();
-    graficoAtividadeEscutas = null;
-  }
-
-  const mapa = new Map();
-  const nomesDias = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-  registros.forEach((registro) => {
-    const data = converterDataReaudicao(registro.dataReouvido || registro.dataOriginal || registro.criadoEm);
-    if (!data) return;
-    let chave;
-    if (agrupamento === 'semana') chave = nomesDias[data.getDay()];
-    else if (agrupamento === 'ano') chave = String(data.getFullYear());
-    else if (agrupamento === 'trimestre') chave = `${data.getFullYear()} T${Math.floor(data.getMonth() / 3) + 1}`;
-    else chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
-    mapa.set(chave, (mapa.get(chave) || 0) + 1);
-  });
-
-  let labels = [...mapa.keys()];
-  if (agrupamento === 'semana') {
-    labels = nomesDias.filter((dia) => mapa.has(dia));
-  } else {
-    labels.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
-  }
-  graficoAtividadeEscutas = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels: labels.length ? labels : ['Sem atividade'],
-      datasets: [{
-        label: 'Escutas',
-        data: labels.length ? labels.map((label) => mapa.get(label)) : [0],
-        backgroundColor: 'rgba(52, 211, 153, 0.72)',
-        borderColor: '#34d399',
-        borderWidth: 1,
-        borderRadius: 5
-      }]
-    },
-    options: {
-      responsive: true,
-      devicePixelRatio: window.devicePixelRatio || 1,
-      maintainAspectRatio: false,
-      scales: {
-        x: { ticks: { color: '#cbd5e1', autoSkip: true, maxRotation: 0 }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: '#cbd5e1', precision: 0 }, grid: { color: 'rgba(255,255,255,0.08)' } }
-      },
-      plugins: { legend: { display: false } }
-    }
-  });
-}
-
-function filtrarRegistrosPorOrigem(registros, origem) {
+function filtrarRegistrosPorOrigem(registros, origem, unicos = true) {
   let filtrados = registros;
   if (origem === 'ineditos') filtrados = registros.filter((item) => !item.isReaudicao && !item.isCaderno);
   if (origem === 'caderno') filtrados = registros.filter((item) => item.isCaderno);
   if (origem === 'reaudicoes') filtrados = registros.filter((item) => item.isReaudicao);
-  return selecionarRegistrosUnicosPorAlbum(filtrados);
+  return unicos ? selecionarRegistrosUnicosPorAlbum(filtrados) : filtrados;
 }
 
-function renderizarGraficosEstatisticas(albuns) {
-  const ranking = document.getElementById('ranking-albuns');
-  if (ranking) {
-    const melhores = [...albuns].sort((a, b) => Number(b.media || 0) - Number(a.media || 0)).slice(0, 10);
-    ranking.innerHTML = melhores.length ? melhores.map((album) => `
-      <li><span>${escaparHtml(album.nome || 'Álbum sem nome')} <small>${escaparHtml(album.banda || '')}</small></span><strong>${Number(album.media || 0).toFixed(1)}</strong></li>
-    `).join('') : '<li class="empty-state">Sem avaliações para ranquear.</li>';
-  }
-
-  const cores = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#14b8a6', '#e879f9', '#f97316', '#a3e635'];
+function desenharGraficoEvolucaoBanda() {
   const bandas = new Map();
-  albuns.forEach((album) => {
+  albunsEvolucaoDisponiveis.forEach((album) => {
     const ano = Number(album.ano);
     const nota = Number(album.media);
     if (!Number.isFinite(ano) || !Number.isFinite(nota)) return;
-    const nome = String(album.banda || 'Desconhecida');
-    if (!bandas.has(nome)) bandas.set(nome, []);
-    bandas.get(nome).push({ x: ano, y: nota, album: album.nome || 'Álbum sem nome' });
+    const banda = String(album.banda || '').trim() || 'Desconhecida';
+    const pontos = bandas.get(banda) || [];
+    pontos.push({ x: ano, y: nota, album: album.nome || 'Álbum sem nome' });
+    bandas.set(banda, pontos);
   });
-  const bandasGrafico = [...bandas.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 8);
-  const canvasBandas = document.getElementById('graficoEvolucaoBandas');
-  if (graficoEvolucaoBandas) graficoEvolucaoBandas.destroy();
-  if (canvasBandas && typeof Chart !== 'undefined') {
-    graficoEvolucaoBandas = new Chart(canvasBandas.getContext('2d'), {
-      type: 'scatter',
-      data: { datasets: bandasGrafico.map(([banda, pontos], indice) => ({
+
+  const entradas = [...bandas.entries()];
+  const seletor = document.getElementById('filtro-banda-evolucao');
+  const filtroGlobal = document.getElementById('filtro-banda-estatistica')?.value || '*';
+  const bandaGlobal = filtroGlobal === '*' ? null : filtroGlobal;
+  const bandasDisponiveis = bandaGlobal
+    ? entradas.filter(([banda]) => banda === bandaGlobal)
+    : entradas;
+
+  if (bandaGlobal && bandasDisponiveis.length) {
+    bandaEvolucaoSelecionada = bandaGlobal;
+  } else if (bandaEvolucaoSelecionada !== '*' &&
+    !bandasDisponiveis.some(([banda]) => banda === bandaEvolucaoSelecionada)) {
+    if (bandasDisponiveis.length) {
+      const indiceAleatorio = Math.floor(Math.random() * bandasDisponiveis.length);
+      bandaEvolucaoSelecionada = bandasDisponiveis[indiceAleatorio]?.[0] || bandasDisponiveis[0][0];
+    } else {
+      bandaEvolucaoSelecionada = null;
+    }
+  }
+
+  if (seletor) {
+    seletor.innerHTML = bandasDisponiveis.length
+      ? `<option value="*">Todas</option>${bandasDisponiveis.map(([banda]) =>
+        `<option value="${escaparHtml(banda)}">${escaparHtml(banda)}</option>`
+      ).join('')}`
+      : '<option value="">Sem bandas com dados</option>';
+    seletor.value = bandaEvolucaoSelecionada || '';
+    seletor.disabled = Boolean(bandaGlobal) || !bandasDisponiveis.length;
+  }
+
+  const mostrandoTodas = bandaEvolucaoSelecionada === '*';
+  const bandaEscolhida = bandasDisponiveis.find(([banda]) => banda === bandaEvolucaoSelecionada);
+  const tituloEvolucao = document.getElementById('grafico-evolucao-banda-selecionada');
+  if (tituloEvolucao) {
+    tituloEvolucao.textContent = mostrandoTodas
+      ? 'Todas as bandas'
+      : bandaEscolhida?.[0] || 'Sem dados cadastrados';
+  }
+
+  if (graficoEvolucaoBandas) {
+    graficoEvolucaoBandas.destroy();
+    graficoEvolucaoBandas = null;
+  }
+  const canvas = document.getElementById('graficoEvolucaoBandas');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const cores = ['#c19a5b', '#9a5149', '#a8a08f', '#75806d', '#8a7256', '#b66e4d', '#857c70', '#ad8350'];
+  const series = mostrandoTodas
+    ? bandasDisponiveis
+    : bandaEscolhida ? [bandaEscolhida] : [];
+  graficoEvolucaoBandas = new Chart(canvas.getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: series.map(([banda, valores], indice) => ({
         label: banda,
-        data: pontos.sort((a, b) => a.x - b.x),
+        data: [...valores].sort((a, b) => a.x - b.x),
         showLine: true,
         borderColor: cores[indice % cores.length],
         backgroundColor: cores[indice % cores.length],
         pointRadius: 5,
         tension: 0.2
-      })) },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'nearest', intersect: false },
-        plugins: { legend: { labels: { color: '#e5e7eb' } }, tooltip: { callbacks: { label: (context) => `${context.dataset.label} · ${context.raw.album} · ${context.raw.x} · ${context.raw.y.toFixed(1)}` } } },
-        scales: {
-          x: { type: 'linear', title: { display: true, text: 'Ano de lançamento', color: '#e5e7eb' }, ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-          y: { min: 0, max: 10, title: { display: true, text: 'Nota média', color: '#e5e7eb' }, ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(255,255,255,0.08)' } }
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (context) => `${context.dataset.label} · ${context.raw.album} · ${context.raw.x} · ${context.raw.y.toFixed(1)}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: true, text: 'Ano de lançamento', color: '#b7b2a8' },
+          ticks: { color: '#a7a094' },
+          grid: { color: 'rgba(210, 195, 170, 0.08)' }
+        },
+        y: {
+          min: 0,
+          max: 10,
+          title: { display: true, text: 'Nota média', color: '#b7b2a8' },
+          ticks: { color: '#a7a094' },
+          grid: { color: 'rgba(210, 195, 170, 0.08)' }
         }
       }
-    });
+    }
+  });
+}
+
+function renderizarGraficosEstatisticas(albuns, albunsTodasBandas = albuns) {
+  renderizarPaginaRanking(albuns);
+  albunsEvolucaoDisponiveis = albunsTodasBandas;
+  desenharGraficoEvolucaoBanda();
+  renderizarGraficoNotaAno(albuns);
+}
+
+function renderizarGraficoNotaAno(albuns) {
+  if (graficoNotaAno) {
+    graficoNotaAno.destroy();
+    graficoNotaAno = null;
   }
 
-  const dias = new Map();
-  albuns.forEach((album) => {
-    const data = converterDataReaudicao(album.dataReouvido || album.criadoEm || album.dataOriginal);
-    const nota = Number(album.media);
-    if (!data || !Number.isFinite(nota)) return;
-    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
-    const atual = dias.get(chave) || { soma: 0, quantidade: 0 };
-    atual.soma += nota;
-    atual.quantidade += 1;
-    dias.set(chave, atual);
-  });
-  const pontosDia = [...dias.entries()].map(([dia, valores]) => ({ x: new Date(`${dia}T12:00:00`).getTime(), y: valores.soma / valores.quantidade, dia, quantidade: valores.quantidade }));
-  const canvasDias = document.getElementById('graficoDispersaoNotasDia');
-  if (graficoNotasDia) graficoNotasDia.destroy();
-  if (canvasDias && typeof Chart !== 'undefined') {
-    graficoNotasDia = new Chart(canvasDias.getContext('2d'), {
-      type: 'scatter',
-      data: { datasets: [{ label: 'Média diária', data: pontosDia, backgroundColor: '#f59e0b', borderColor: '#fbbf24', pointRadius: 6 }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#e5e7eb' } }, tooltip: { callbacks: { label: (context) => `${formatarDataReaudicao(context.raw.dia)} · ${context.raw.y.toFixed(1)} (${context.raw.quantidade} audição(ões))` } } },
-        scales: {
-          x: { type: 'linear', ticks: { color: '#cbd5e1', callback: (valor) => new Intl.DateTimeFormat('pt-BR').format(new Date(Number(valor))) }, title: { display: true, text: 'Dia', color: '#e5e7eb' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-          y: { min: 0, max: 10, ticks: { color: '#cbd5e1' }, title: { display: true, text: 'Nota média do dia', color: '#e5e7eb' }, grid: { color: 'rgba(255,255,255,0.08)' } }
+  const canvas = document.getElementById('graficoNotaAno');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const dados = albuns
+    .map((album) => {
+      const nota = album.media === '' || album.media === null || album.media === undefined
+        ? Number.NaN
+        : Number(album.media);
+      return {
+        ano: Number(album.ano),
+        nota,
+        nome: album.nome || 'Álbum sem nome',
+        banda: String(album.banda || '').trim() || 'Banda desconhecida'
+      };
+    })
+    .filter((album) => Number.isFinite(album.ano) && album.ano > 0 && Number.isFinite(album.nota))
+    .sort((a, b) => a.ano - b.ano);
+  const anos = dados.map((album) => album.ano);
+  const menorAno = anos.length ? Math.min(...anos) : 1900;
+  const maiorAno = anos.length ? Math.max(...anos) : 2100;
+
+  graficoNotaAno = new Chart(canvas.getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'Nota Média do Álbum',
+        data: dados.map((album) => ({
+          x: album.ano,
+          y: album.nota,
+          album: album.nome,
+          banda: album.banda,
+          ano: album.ano,
+          nota: album.nota
+        })),
+        showLine: true,
+        borderColor: '#c19a5b',
+        backgroundColor: 'rgba(193, 154, 91, 0.18)',
+        borderWidth: 1,
+        tension: 0.18,
+        pointRadius: 6,
+        pointHoverRadius: 9,
+        pointBackgroundColor: '#d8b576',
+        pointBorderColor: '#f0e9dc',
+        pointBorderWidth: 1.5
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#c9c2b5' } },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const item = items[0]?.raw || {};
+              return `${item.banda || 'Banda desconhecida'} · ${item.album || 'Álbum sem nome'}`;
+            },
+            label: (context) => {
+              const item = context.raw || {};
+              return `Ano: ${item.ano || '-'} · Nota: ${(item.nota ?? context.parsed.y).toFixed(1)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: menorAno - 1,
+          max: maiorAno + 1,
+          title: { display: true, text: 'Ano de lançamento', color: '#d1c5ae' },
+          ticks: {
+            color: '#c2b59d',
+            autoSkip: true,
+            maxTicksLimit: 12,
+            maxRotation: 0,
+            callback: (value) => Number.isInteger(Number(value)) ? String(value) : ''
+          },
+          grid: { color: 'rgba(210, 195, 170, 0.1)' },
+          border: { color: 'rgba(210, 195, 170, 0.25)' }
+        },
+        y: {
+          min: -1,
+          max: 10,
+          title: { display: true, text: 'Nota média', color: '#d1c5ae' },
+          ticks: { color: '#c2b59d', stepSize: 1, maxTicksLimit: 12 },
+          grid: { color: 'rgba(210, 195, 170, 0.1)' },
+          border: { color: 'rgba(210, 195, 170, 0.25)' }
         }
       }
-    });
+    }
+  });
+}
+
+function renderizarPaginaRanking(albuns) {
+  const ranking = document.getElementById('ranking-albuns');
+  const paginacao = document.getElementById('paginacao-ranking');
+  const infoPagina = document.getElementById('ranking-pagina-info');
+  const botaoAnterior = document.getElementById('ranking-anterior');
+  const botaoProxima = document.getElementById('ranking-proxima');
+  if (!ranking) return;
+
+  const ordenados = [...albuns].sort((a, b) => Number(b.media || 0) - Number(a.media || 0));
+  const totalPaginas = Math.max(1, Math.ceil(ordenados.length / ALBUNS_POR_PAGINA_RANKING));
+  paginaRankingAtual = Math.min(Math.max(1, paginaRankingAtual), totalPaginas);
+  const inicio = (paginaRankingAtual - 1) * ALBUNS_POR_PAGINA_RANKING;
+  const pagina = ordenados.slice(inicio, inicio + ALBUNS_POR_PAGINA_RANKING);
+
+  ranking.innerHTML = pagina.length ? pagina.map((album, indice) => `
+    <li value="${inicio + indice + 1}"><span>${escaparHtml(album.nome || 'Álbum sem nome')} <small>${escaparHtml(album.banda || '')}</small></span><strong>${Number(album.media || 0).toFixed(1)}</strong></li>
+  `).join('') : '<li class="empty-state">Sem avaliações para ranquear.</li>';
+
+  if (infoPagina) infoPagina.textContent = `Página ${paginaRankingAtual} de ${totalPaginas}`;
+  if (botaoAnterior) botaoAnterior.disabled = paginaRankingAtual <= 1;
+  if (botaoProxima) botaoProxima.disabled = paginaRankingAtual >= totalPaginas;
+  if (paginacao) paginacao.classList.toggle('escondido', ordenados.length <= ALBUNS_POR_PAGINA_RANKING);
+}
+
+function obterAlbunsSelecionadosEstatisticas() {
+  const filtro = document.getElementById('filtro-tipo-estatistica').value;
+  const banda = document.getElementById('filtro-banda-estatistica').value;
+  let albuns = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro);
+  if (banda && banda !== '*') {
+    albuns = albuns.filter((album) => (String(album.banda || '').trim() || 'Desconhecida') === banda);
   }
+  return albuns;
+}
+
+function atualizarSeletorBandaEstatisticas(albuns) {
+  const seletor = document.getElementById('filtro-banda-estatistica');
+  if (!seletor) return '*';
+
+  const contagem = new Map();
+  albuns.forEach((album) => {
+    const banda = String(album.banda || '').trim() || 'Desconhecida';
+    contagem.set(banda, (contagem.get(banda) || 0) + 1);
+  });
+  const bandas = [...contagem.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt-BR'));
+  const valorAnterior = seletor.value;
+  const valorPadrao = '*';
+
+  seletor.innerHTML = [
+    `<option value="*">Todas as bandas (${albuns.length})</option>`,
+    ...bandas.map(([banda, total]) => `<option value="${escaparHtml(banda)}">${escaparHtml(banda)} (${total})</option>`)
+  ].join('');
+  seletor.value = valorAnterior === '*' || contagem.has(valorAnterior) ? valorAnterior : valorPadrao;
+  if (!seletor.value) seletor.value = valorPadrao;
+  return seletor.value || '*';
 }
 
 function atualizarMetricasBandas(albunsFiltrados) {
@@ -4061,13 +4289,13 @@ function atualizarMetricasBandas(albunsFiltrados) {
   const favorita = [...bandasPorNota.entries()].map(([banda, dados]) => ({ banda, media: dados.soma / dados.quantidade }))
     .sort((a, b) => b.media - a.media)[0];
   const reproducoes = new Map();
-  registrosEstatisticas.forEach((registro) => {
+  albunsFiltrados.forEach((registro) => {
     const banda = String(registro.banda || 'Desconhecida').trim();
     reproducoes.set(banda, (reproducoes.get(banda) || 0) + 1);
   });
   const maisOuvida = [...reproducoes.entries()].sort((a, b) => b[1] - a[1])[0];
   const reaudicoes = new Map();
-  registrosEstatisticas.filter((registro) => registro.isReaudicao && !registro.isCaderno).forEach((registro) => {
+  albunsFiltrados.filter((registro) => registro.isReaudicao && !registro.isCaderno).forEach((registro) => {
     const banda = String(registro.banda || 'Desconhecida').trim();
     reaudicoes.set(banda, (reaudicoes.get(banda) || 0) + 1);
   });
@@ -4141,28 +4369,66 @@ function criarRegistrosHistoricoEstatisticas(id, dado) {
   return registros;
 }
 
-document.getElementById('filtro-tipo-estatistica').addEventListener('change', carregarEstatisticas);
-document.getElementById('filtro-periodo-atividade').addEventListener('change', () => {
-  const tipo = document.getElementById('filtro-tipo-estatistica').value;
-  renderizarGraficoAtividade(filtrarRegistrosPorOrigem(registrosEstatisticas, tipo));
+document.getElementById('filtro-tipo-estatistica').addEventListener('change', () => {
+  paginaRankingAtual = 1;
+  paginaTimelineAtual = 1;
+  carregarEstatisticas(true);
+});
+document.getElementById('filtro-banda-estatistica').addEventListener('change', () => {
+  paginaRankingAtual = 1;
+  paginaTimelineAtual = 1;
+  carregarEstatisticas(false);
+});
+document.getElementById('filtro-banda-evolucao').addEventListener('change', (evento) => {
+  bandaEvolucaoSelecionada = evento.target.value || null;
+  desenharGraficoEvolucaoBanda();
+});
+document.getElementById('ranking-anterior').addEventListener('click', () => {
+  paginaRankingAtual = Math.max(1, paginaRankingAtual - 1);
+  renderizarPaginaRanking(obterAlbunsSelecionadosEstatisticas());
+});
+document.getElementById('ranking-proxima').addEventListener('click', () => {
+  paginaRankingAtual += 1;
+  renderizarPaginaRanking(obterAlbunsSelecionadosEstatisticas());
+});
+document.getElementById('timeline-anterior').addEventListener('click', () => {
+  paginaTimelineAtual = Math.max(1, paginaTimelineAtual - 1);
+  const filtro = document.getElementById('filtro-tipo-estatistica').value;
+  let base = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro, false);
+  const banda = document.getElementById('filtro-banda-estatistica').value;
+  if (banda && banda !== '*') base = base.filter((album) => (String(album.banda || '').trim() || 'Desconhecida') === banda);
+  carregarTimeline(base);
+});
+document.getElementById('timeline-proxima').addEventListener('click', () => {
+  paginaTimelineAtual += 1;
+  const filtro = document.getElementById('filtro-tipo-estatistica').value;
+  let base = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro, false);
+  const banda = document.getElementById('filtro-banda-estatistica').value;
+  if (banda && banda !== '*') base = base.filter((album) => (String(album.banda || '').trim() || 'Desconhecida') === banda);
+  carregarTimeline(base);
 });
 
 // ESTATÍSTICAS
-async function carregarEstatisticas() {
-  const [albunsSnapshot, historicoSnapshot] = await Promise.all([
-    getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid))),
-    getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)))
-  ]);
-  const albunsIneditos = albunsSnapshot.docs
-    .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-    .filter((album) => !album.isReaudicao && !album.integradoAlbumPrincipal)
-    .map((album) => ({ ...album, isReaudicao: false, isCaderno: false, origemRegistro: 'Inédito' }));
-  const historico = historicoSnapshot.docs.flatMap((docSnap) => criarRegistrosHistoricoEstatisticas(docSnap.id, docSnap.data()));
-  registrosEstatisticas = [...albunsIneditos, ...historico];
+async function carregarEstatisticas(recarregarDados = true) {
+  if (recarregarDados) {
+    const [albunsSnapshot, historicoSnapshot] = await Promise.all([
+      getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid))),
+      getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)))
+    ]);
+    const albunsIneditos = albunsSnapshot.docs
+      .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+      .filter((album) => !album.isReaudicao && !album.integradoAlbumPrincipal)
+      .map((album) => ({ ...album, isReaudicao: false, isCaderno: false, origemRegistro: 'Inédito' }));
+    const historico = historicoSnapshot.docs.flatMap((docSnap) => criarRegistrosHistoricoEstatisticas(docSnap.id, docSnap.data()));
+    registrosEstatisticas = [...albunsIneditos, ...historico];
+  }
   const filtro = document.getElementById('filtro-tipo-estatistica').value;
-  const albuns = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro);
-  renderizarGraficoAtividade(albuns);
-  renderizarGraficosEstatisticas(albuns);
+  const albunsTodasBandas = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro);
+  const bandaSelecionada = atualizarSeletorBandaEstatisticas(albunsTodasBandas);
+  const albuns = bandaSelecionada === '*'
+    ? albunsTodasBandas
+    : albunsTodasBandas.filter((album) => (String(album.banda || '').trim() || 'Desconhecida') === bandaSelecionada);
+  renderizarGraficosEstatisticas(albuns, albunsTodasBandas);
   atualizarMetricasBandas(albuns);
 
   document.getElementById('stat-total').innerText = albuns.length;
@@ -4190,11 +4456,7 @@ async function carregarEstatisticas() {
     document.getElementById('stat-album-curto').innerText = '-';
     document.getElementById('stat-correlacao-duracao').innerText = '-';
     atualizarMetricasAudicao([]);
-    [window.graficoBandasChart, window.graficoDispersaoBandasChart, window.graficoDecadasChart, window.meuGrafico].forEach((chart) => chart?.destroy());
-    window.graficoBandasChart = null;
-    window.graficoDispersaoBandasChart = null;
-    window.graficoDecadasChart = null;
-    window.meuGrafico = null;
+    carregarTimeline([]);
     return;
   }
 
@@ -4204,12 +4466,14 @@ async function carregarEstatisticas() {
   document.getElementById('stat-melhor').innerText = `${albunsPorNota[0].nome} (${albunsPorNota[0].media})`;
   document.getElementById('stat-pior').innerText = `${albunsPorNota[albunsPorNota.length - 1].nome} (${albunsPorNota[albunsPorNota.length - 1].media})`;
 
-  const contagemBandas = {};
+  const contagemBandas = new Map();
   albuns.forEach(a => {
-    const b = a.banda ? a.banda.trim() : 'Desconhecida';
-    contagemBandas[b] = (contagemBandas[b] || 0) + 1;
+    const b = String(a.banda || '').trim() || 'Desconhecida';
+    contagemBandas.set(b, (contagemBandas.get(b) || 0) + 1);
   });
-  document.getElementById('stat-bandas-diferentes').innerText = Object.keys(contagemBandas).length;
+  document.getElementById('stat-bandas-diferentes').innerText = new Set(
+    albuns.map((album) => (String(album.banda || '').trim() || 'Desconhecida'))
+  ).size;
 
   const totalFaixas = albuns.reduce((total, album) => total + (Array.isArray(album.faixas) ? album.faixas.length : 0), 0);
   const mediaFaixas = totalFaixas / albuns.length;
@@ -4223,11 +4487,16 @@ async function carregarEstatisticas() {
 
   const decadas = {};
   albuns.forEach(a => {
-    if (a.ano) {
-      const decada = Math.floor(a.ano / 10) * 10;
-      if (!decadas[decada]) decadas[decada] = { soma: 0, qtd: 0 };
-      decadas[decada].soma += a.media;
-      decadas[decada].qtd += 1;
+    const ano = Number(a.ano);
+    const nota = Number(a.media);
+    if (Number.isFinite(ano) && ano > 0) {
+      const decada = Math.floor(ano / 10) * 10;
+      if (!decadas[decada]) decadas[decada] = { soma: 0, qtdNotas: 0, totalAlbuns: 0 };
+      decadas[decada].totalAlbuns += 1;
+      if (Number.isFinite(nota) && nota >= 0 && nota <= 10) {
+        decadas[decada].soma += nota;
+        decadas[decada].qtdNotas += 1;
+      }
     }
   });
 
@@ -4236,22 +4505,24 @@ async function carregarEstatisticas() {
   let decadaMaisQtd = '-';
   let maiorQtd = 0;
 
-  const labelsDecadas = Object.keys(decadas).sort();
-  const mediasDecadas = labelsDecadas.map(d => {
-    const qtd = decadas[d].qtd;
+  const labelsDecadas = Object.keys(decadas).sort((a, b) => Number(a) - Number(b));
+  labelsDecadas.forEach((d) => {
+    const qtd = decadas[d].qtdNotas;
+    const totalAlbuns = decadas[d].totalAlbuns;
+
+    if (totalAlbuns > maiorQtd) {
+      maiorQtd = totalAlbuns;
+      decadaMaisQtd = `${d}s (${totalAlbuns} álbuns)`;
+    }
+    if (!qtd) return;
+
     const media = parseFloat((decadas[d].soma / qtd).toFixed(2));
 
-    if (media > maiorMedia) {
+    if (decadaMaiorMedia === '-' || media > maiorMedia) {
       maiorMedia = media;
       decadaMaiorMedia = `${d}s (${media} de média)`;
     }
 
-    if (qtd > maiorQtd) {
-      maiorQtd = qtd;
-      decadaMaisQtd = `${d}s (${qtd} álbuns)`;
-    }
-
-    return media;
   });
 
   document.getElementById('stat-decada-media').innerText = decadaMaiorMedia;
@@ -4293,8 +4564,8 @@ async function carregarEstatisticas() {
     document.getElementById('stat-dias-off').innerText = '-';
   }
 
-  const bandasResumo = Object.entries(contagemBandas).map(([banda, quantidade]) => {
-    const albunsDaBanda = albuns.filter(album => (album.banda || '').trim() === banda);
+  const bandasResumo = [...contagemBandas.entries()].map(([banda, quantidade]) => {
+    const albunsDaBanda = albuns.filter(album => ((album.banda || '').trim() || 'Desconhecida') === banda);
     const somaMedia = albunsDaBanda.reduce((total, album) => total + Number(album.media || 0), 0);
     const mediaBanda = albunsDaBanda.length ? somaMedia / albunsDaBanda.length : 0;
     return {
@@ -4306,301 +4577,7 @@ async function carregarEstatisticas() {
 
   // Calcular banda com a menor nota média
   const bandaPior = bandasResumo[bandasResumo.length - 1];
-  document.getElementById('stat-banda-pior').innerText = `${bandaPior.banda} (${bandaPior.media.toFixed(2)}/10)`;
-
-  const bandasVisiveis = bandasResumo.slice(0, 12);
-  let bandasAgrupadas = [...bandasVisiveis];
-
-  if (bandasResumo.length > 12) {
-    const demais = bandasResumo.slice(12);
-    const quantidadeRestante = demais.reduce((total, item) => total + item.quantidade, 0);
-    const mediaRestante = demais.length
-      ? demais.reduce((total, item) => total + item.media * item.quantidade, 0) / quantidadeRestante
-      : 0;
-
-    bandasAgrupadas.push({
-      banda: 'Outras',
-      quantidade: quantidadeRestante,
-      media: Number(mediaRestante.toFixed(2))
-    });
-  }
-
-  const faixaMediaPorBanda = bandasAgrupadas.length ? bandasAgrupadas.map(item => item.media) : [0];
-  const labelsBandas = bandasAgrupadas.length ? bandasAgrupadas.map(item => item.banda) : ['Sem dados'];
-
-  const graficoBandasCtx = document.getElementById('graficoBandas')?.getContext('2d');
-  if (window.graficoBandasChart) window.graficoBandasChart.destroy();
-
-  if (graficoBandasCtx) {
-    const labelsBandasCurtas = labelsBandas.map(label => {
-      if (label === 'Outras') return 'Outras';
-      return label.length > 18 ? `${label.slice(0, 15)}…` : label;
-    });
-
-    ajustarAlturaCanvas(graficoBandasCtx.canvas, labelsBandas.length, 360, 28, 620, 860);
-
-    window.graficoBandasChart = new Chart(graficoBandasCtx, {
-      type: 'bar',
-      data: {
-        labels: labelsBandasCurtas,
-        datasets: [{
-          label: 'Média da banda',
-          data: faixaMediaPorBanda,
-          backgroundColor: labelsBandas.map((_, index) => index === 0 ? '#22c55e' : index === labelsBandas.length - 1 ? '#f97316' : '#3b82f6'),
-          borderRadius: 8,
-          borderSkipped: false,
-          barThickness: 18
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 600 },
-        layout: { padding: { top: 8, right: 12, bottom: 8, left: 12 } },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              title: (items) => {
-                const label = labelsBandas[items[0]?.dataIndex ?? 0] || '';
-                return label;
-              },
-              label: (ctx) => `${ctx.parsed.x.toFixed(2)} / 10`
-            }
-          }
-        },
-        scales: {
-          x: {
-            min: 0,
-            max: 10,
-            ticks: {
-              color: '#fff',
-              stepSize: 2,
-              maxTicksLimit: 8
-            },
-            grid: { color: 'rgba(255,255,255,0.08)' },
-            title: { display: true, text: 'Nota média', color: '#fff' }
-          },
-          y: {
-            ticks: {
-              color: '#fff',
-              autoSkip: false,
-              maxTicksLimit: 12
-            },
-            grid: { display: false }
-          }
-        }
-      }
-    });
-  }
-
-  const dispersaoBandasCtx = document.getElementById('graficoDispersaoBandas')?.getContext('2d');
-  if (window.graficoDispersaoBandasChart) window.graficoDispersaoBandasChart.destroy();
-
-  if (dispersaoBandasCtx) {
-    const scatterData = bandasResumo.map(item => ({
-      x: item.quantidade,
-      y: item.media,
-      r: Math.min(12, 5 + item.quantidade * 1.2)
-    }));
-
-    const maxXScatter = Math.max(8, ...scatterData.map(item => item.x), 1);
-    ajustarAlturaCanvas(dispersaoBandasCtx.canvas, scatterData.length, 360, 36, 620, 780);
-
-    window.graficoDispersaoBandasChart = new Chart(dispersaoBandasCtx, {
-      type: 'bubble',
-      data: {
-        datasets: [{
-          label: 'Bandas',
-          data: scatterData,
-          backgroundColor: 'rgba(34, 197, 94, 0.7)',
-          borderColor: '#86efac',
-          borderWidth: 1
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 500 },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `${labelsBandas[ctx.dataIndex]} · ${ctx.raw.x} álbuns · ${ctx.raw.y.toFixed(2)}/10`
-            }
-          },
-          zoom: {
-            pan: {
-              enabled: true,
-              mode: 'xy',
-              threshold: 10
-            },
-            zoom: {
-              wheel: { enabled: true },
-              pinch: { enabled: true },
-              mode: 'xy',
-              drag: false,
-              limits: {
-                x: { min: 0, max: Math.max(15, maxXScatter + 5) },
-                y: { min: 0, max: 10 }
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            min: 0,
-            max: Math.max(15, maxXScatter + 5),
-            title: { display: true, text: 'Quantidade de álbuns', color: '#fff' },
-            ticks: {
-              color: '#fff',
-              autoSkip: true,
-              maxTicksLimit: 10
-            },
-            grid: { color: 'rgba(255,255,255,0.08)' }
-          },
-          y: {
-            min: 0,
-            max: 10,
-            title: { display: true, text: 'Nota média', color: '#fff' },
-            ticks: { color: '#fff', stepSize: 2, maxTicksLimit: 8 },
-            grid: { color: 'rgba(255,255,255,0.08)' }
-          }
-        }
-      }
-    });
-  }
-
-  const ctxDecadas = document.getElementById('graficoDecadas').getContext('2d');
-  if (window.graficoDecadasChart) window.graficoDecadasChart.destroy();
-
-  ajustarAlturaCanvas(ctxDecadas.canvas, labelsDecadas.length, 360, 34, 620, 780);
-
-  window.graficoDecadasChart = new Chart(ctxDecadas, {
-    type: 'bar',
-    data: {
-      labels: labelsDecadas.map(d => `${d}s`),
-      datasets: [{
-        label: 'Nota Média por Década',
-        data: mediasDecadas,
-        backgroundColor: '#3498db',
-        borderRadius: 6,
-        barThickness: 26
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: '#fff' } }
-      },
-      scales: {
-        y: { min: 0, max: 10, ticks: { color: '#fff', maxTicksLimit: 8 } },
-        x: {
-          ticks: {
-            color: '#fff',
-            autoSkip: true,
-            maxTicksLimit: 12
-          }
-        }
-      }
-    }
-  });
-
-  const albunsPorAno = [...albuns].filter(album => Number(album.ano) > 0).sort((a, b) => Number(a.ano || 0) - Number(b.ano || 0));
-  const anosRegistrados = [...new Set(albunsPorAno.map(album => Number(album.ano || 0)))].sort((a, b) => a - b);
-  const datasetLinha = albunsPorAno.map(album => ({
-    x: Number(album.ano || 0),
-    y: Number(album.media || 0),
-    album: album.nome || 'Álbum sem nome',
-    banda: album.banda || 'Banda desconhecida',
-    ano: Number(album.ano || 0),
-    nota: Number(album.media || 0)
-  }));
-
-  const xMin = anosRegistrados.length ? Math.min(...anosRegistrados) : 1900;
-  const xMax = anosRegistrados.length ? Math.max(...anosRegistrados) : 2100;
-
-  const ctx = document.getElementById('graficoCorrelacao')?.getContext('2d');
-  if (window.meuGrafico) window.meuGrafico.destroy();
-
-  if (!ctx) return;
-
-  window.meuGrafico = new Chart(ctx, {
-    type: 'line',
-    data: {
-      datasets: [{
-        label: 'Nota Média do Álbum',
-        data: datasetLinha,
-        borderColor: '#1db954',
-        backgroundColor: 'rgba(29, 185, 84, 0.15)',
-        borderWidth: 3,
-        pointRadius: 5,
-        pointHoverRadius: 8,
-        pointBackgroundColor: '#34d399',
-        pointBorderColor: '#ffffff',
-        pointBorderWidth: 2,
-        fill: true,
-        tension: 0.3,
-        cubicInterpolationMode: 'monotone'
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 600 },
-      interaction: { mode: 'nearest', intersect: false },
-      layout: { padding: { top: 10, right: 12, bottom: 16, left: 10 } },
-      plugins: {
-        legend: { labels: { color: '#fff' } },
-        tooltip: {
-          callbacks: {
-            title: (items) => {
-              const item = items[0]?.raw || {};
-              return `${item.banda || 'Banda desconhecida'} · ${item.album || 'Álbum sem nome'}`;
-            },
-            label: (context) => {
-              const item = context.raw || {};
-              return `Ano: ${item.ano || '-'} · Nota: ${(item.nota ?? context.parsed.y).toFixed(1)}`;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          type: 'linear',
-          min: xMin - 1,
-          max: xMax + 1,
-          title: { display: true, text: 'Ano de Lançamento', color: '#fff' },
-          ticks: {
-            color: '#fff',
-            stepSize: 1,
-            maxRotation: 0,
-            minRotation: 0,
-            callback: (value) => {
-              const numero = Number(value);
-              return anosRegistrados.includes(numero) ? String(numero) : '';
-            }
-          },
-          grid: { color: 'rgba(255,255,255,0.08)' },
-          border: { color: 'rgba(255,255,255,0.18)' }
-        },
-        y: {
-          min: 0,
-          max: 10,
-          title: { display: true, text: 'Nota Média', color: '#fff' },
-          ticks: {
-            color: '#fff',
-            stepSize: 2,
-            maxTicksLimit: 6
-          },
-          grid: { color: 'rgba(255,255,255,0.08)' },
-          border: { color: 'rgba(255,255,255,0.18)' }
-        }
-      }
-    }
-  });
+  document.getElementById('stat-banda-pior').innerText = bandaPior ? `${bandaPior.banda} (${bandaPior.media.toFixed(2)}/10)` : '-';
 
   // Calcular tendência de notas
   const albunsPorData = [...albuns].filter(a => a.criadoEm).sort((a, b) => new Date(a.criadoEm) - new Date(b.criadoEm));
@@ -4648,35 +4625,56 @@ async function carregarEstatisticas() {
   }
 
   // Carregar Timeline
-  carregarTimeline(albuns);
+  let registrosTimeline = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro, false);
+  if (bandaSelecionada !== '*') {
+    registrosTimeline = registrosTimeline.filter((album) =>
+      (String(album.banda || '').trim() || 'Desconhecida') === bandaSelecionada
+    );
+  }
+  carregarTimeline(registrosTimeline);
 }
 
 // Timeline de histórico
 function carregarTimeline(albuns) {
   const timelineContainer = document.getElementById('timeline-albuns');
+  const paginacao = document.getElementById('paginacao-timeline');
+  const infoPagina = document.getElementById('timeline-pagina-info');
+  const botaoAnterior = document.getElementById('timeline-anterior');
+  const botaoProxima = document.getElementById('timeline-proxima');
   if (!timelineContainer) return;
 
-  const albunsPorData = [...albuns].filter(a => a.criadoEm).sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm)).slice(0, 20);
+  const timestampDoAlbum = (album) => converterDataReaudicao(album.criadoEm)?.getTime() || 0;
+  const todosAlbunsPorData = [...albuns].sort((a, b) => timestampDoAlbum(b) - timestampDoAlbum(a));
+  const totalPaginas = Math.max(1, Math.ceil(todosAlbunsPorData.length / ALBUNS_POR_PAGINA_TIMELINE));
+  paginaTimelineAtual = Math.min(Math.max(1, paginaTimelineAtual), totalPaginas);
+  const inicio = (paginaTimelineAtual - 1) * ALBUNS_POR_PAGINA_TIMELINE;
+  const albunsPorData = todosAlbunsPorData.slice(inicio, inicio + ALBUNS_POR_PAGINA_TIMELINE);
 
   if (albunsPorData.length === 0) {
     timelineContainer.innerHTML = '<p style="text-align: center; color: var(--muted); padding: 20px;">Nenhum álbum adicionado ainda.</p>';
-    return;
+  } else {
+    timelineContainer.innerHTML = albunsPorData.map(album => {
+      const data = converterDataReaudicao(album.criadoEm);
+      const dataFormatada = data
+        ? data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'Data não informada';
+      return `
+        <div class="timeline-item" onclick="navegarPara('sec-dashboard')">
+          <div class="timeline-item-time">${escaparHtml(dataFormatada)}</div>
+          <div class="timeline-item-content">
+            <div class="timeline-item-title">${escaparHtml(album.nome || 'Álbum sem nome')}</div>
+            <div class="timeline-item-banda">${escaparHtml(album.banda || 'Artista desconhecido')}</div>
+            <div class="timeline-item-nota">${Number(album.media || 0).toFixed(1)} / 10</div>
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
-  timelineContainer.innerHTML = albunsPorData.map(album => {
-    const data = new Date(album.criadoEm);
-    const dataFormatada = data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    return `
-      <div class="timeline-item" onclick="navegarPara('sec-dashboard')">
-        <div class="timeline-item-time">${dataFormatada}</div>
-        <div class="timeline-item-content">
-          <div class="timeline-item-title">${album.nome || 'Álbum sem nome'}</div>
-          <div class="timeline-item-banda">${album.banda || 'Artista desconhecido'}</div>
-          <div class="timeline-item-nota">⭐ ${album.media || '0'}/10</div>
-        </div>
-      </div>
-    `;
-  }).join('');
+  if (infoPagina) infoPagina.textContent = `Página ${paginaTimelineAtual} de ${totalPaginas}`;
+  if (botaoAnterior) botaoAnterior.disabled = paginaTimelineAtual <= 1;
+  if (botaoProxima) botaoProxima.disabled = paginaTimelineAtual >= totalPaginas;
+  if (paginacao) paginacao.classList.toggle('escondido', todosAlbunsPorData.length <= ALBUNS_POR_PAGINA_TIMELINE);
 }
 
 // Busca Rápida
@@ -4729,40 +4727,6 @@ if (document.getElementById('busca-rapida-stats')) {
     window.executarBuscaRapida(e.target.value);
   });
 }
-
-// Lista de Wallpapers disponíveis
-const WALLPAPER_PADRAO = 'assets/andjustice.jpg';
-const wallpapers = [
-  'assets/andjustice.jpg',
-  'assets/images (2).jfif',
-  'assets/yh43bx8tdof21.jpg'
-];
-
-let indiceWallpaperAtual = 0;
-
-function aplicarWallpaper(index) {
-  const bgContainer = document.getElementById('wallpaper-container');
-  if (bgContainer) {
-    bgContainer.style.display = 'none';
-    bgContainer.style.backgroundImage = 'none';
-  }
-
-  document.body.style.background = 'transparent';
-  document.body.style.backgroundImage = 'none';
-  document.body.style.backgroundColor = 'transparent';
-
-  const urls = wallpapers.length ? wallpapers : [WALLPAPER_PADRAO];
-  const indice = Number.isInteger(index) ? index : indiceWallpaperAtual;
-  indiceWallpaperAtual = (Math.abs(indice) % urls.length + urls.length) % urls.length;
-}
-
-function proximoWallpaper() {
-  indiceWallpaperAtual = (indiceWallpaperAtual + 1) % wallpapers.length;
-  aplicarWallpaper(indiceWallpaperAtual);
-}
-
-aplicarWallpaper(indiceWallpaperAtual);
-setInterval(proximoWallpaper, 6000);
 
 // Função para atualizar a Saudação conforme o horário do dia
 function atualizarSaudacao() {
