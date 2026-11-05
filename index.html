@@ -215,6 +215,50 @@
                     </div>
 
                     <div class="grupo-campo">
+                        <label for="album-subgenero">Subgênero</label>
+                        <select id="album-subgenero">
+                            <option value="">Selecione um subgênero</option>
+                            <optgroup label="Metal">
+                                <option>Alternative Metal</option>
+                                <option>Black Metal</option>
+                                <option>Death Metal</option>
+                                <option>Deathcore</option>
+                                <option>Doom Metal</option>
+                                <option>Folk Metal</option>
+                                <option>Glam Metal</option>
+                                <option>Gothic Metal</option>
+                                <option>Groove Metal</option>
+                                <option>Heavy Metal</option>
+                                <option>Industrial Metal</option>
+                                <option>Metalcore</option>
+                                <option>Nu Metal</option>
+                                <option>Power Metal</option>
+                                <option>Progressive Metal</option>
+                                <option>Sludge Metal</option>
+                                <option>Speed Metal</option>
+                                <option>Stoner Metal</option>
+                                <option>Symphonic Metal</option>
+                                <option>Thrash Metal</option>
+                            </optgroup>
+                            <optgroup label="Rock">
+                                <option>Alternative Rock</option>
+                                <option>Classic Rock</option>
+                                <option>Grunge</option>
+                                <option>Hard Rock</option>
+                                <option>Indie Rock</option>
+                                <option>Post-Punk</option>
+                                <option>Progressive Rock</option>
+                                <option>Psychedelic Rock</option>
+                                <option>Punk Rock</option>
+                                <option>Rock and Roll</option>
+                                <option>Southern Rock</option>
+                                <option>Stoner Rock</option>
+                            </optgroup>
+                            <option value="Outro">Outro</option>
+                        </select>
+                    </div>
+
+                    <div class="grupo-campo">
                         <label>Capa do Álbum (Selecione um Arquivo ou Digite a URL)</label>
                         <div class="grupo-imagem-input">
                             <input type="file" id="album-file" accept="image/*">
@@ -804,6 +848,32 @@
                         <button type="button" class="btn-secundario btn-sm" id="ranking-proxima" aria-label="Próxima página do ranking">Próxima ›</button>
                     </div>
                 </div>
+            </div>
+
+            <div class="grid-estatisticas-visuais">
+                <section class="container-grafico heatmap-estatisticas" aria-labelledby="titulo-heatmap">
+                    <h3 id="titulo-heatmap">Mapa de Atividade de Audições</h3>
+                    <p class="grafico-descricao">Cada quadrado representa um dia e a intensidade indica quantos registros foram feitos.</p>
+                    <div class="heatmap-scroll">
+                        <div id="heatmap-atividade" class="heatmap-grade" role="group" aria-label="Atividade diária dos últimos 12 meses"></div>
+                    </div>
+                    <div class="heatmap-legenda" aria-label="Escala de atividade">
+                        <span>Menos</span><i class="heatmap-nivel-0"></i><i class="heatmap-nivel-1"></i><i class="heatmap-nivel-2"></i><i class="heatmap-nivel-3"></i><i class="heatmap-nivel-4"></i><span>Mais</span>
+                    </div>
+                </section>
+
+                <section class="container-grafico tendencia-temporal-estatisticas" aria-labelledby="titulo-tendencia-temporal">
+                    <h3 id="titulo-tendencia-temporal">Rigor das Notas ao Longo do Tempo</h3>
+                    <p class="grafico-descricao">Volume de álbuns avaliados e nota média por mês; a linha tracejada indica a tendência da média.</p>
+                    <div class="canvas-wrapper canvas-wrapper--compact"><canvas id="graficoTendenciaTemporal"></canvas></div>
+                    <p id="resumo-tendencia-temporal" class="resumo-tendencia" aria-live="polite">Aguardando dados de avaliação.</p>
+                </section>
+
+                <section class="container-grafico posicao-faixas-estatisticas" aria-labelledby="titulo-posicao-faixas">
+                    <h3 id="titulo-posicao-faixas">Posição das Faixas Favoritas</h3>
+                    <p class="grafico-descricao">Compara em que parte do álbum suas faixas favoritas costumam aparecer.</p>
+                    <div class="canvas-wrapper canvas-wrapper--compact"><canvas id="graficoPosicaoFaixas"></canvas></div>
+                </section>
             </div>
 
             <!-- Histórico de Avaliações / Timeline -->

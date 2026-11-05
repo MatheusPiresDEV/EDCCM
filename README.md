@@ -9,7 +9,7 @@ Uma aplicação web interativa, moderna e responsiva para **avaliação detalhad
 ## 🌟 Principais Funcionalidades
 
 ### 🎧 1. Avaliação e Gestão de Álbuns
-- **Cadastro Detalhado:** Registro de nome, artista/banda, ano de lançamento, capa (upload ou URL), música favorita e observações gerais.
+- **Cadastro Detalhado:** Registro de nome, artista/banda, ano de lançamento, subgênero, capa (upload ou URL), música favorita e observações gerais.
 - **Sistema de Faixas e Notas:** Adição dinâmica de faixas com notas individuais e cálculo automático da média do álbum.
 - **Busca e Filtros Avançados:** Filtre seus álbuns por nome, artista, ano ou ordene por mais recentes, melhores/piores notas e ano de lançamento.
 - **Paginação:** Exibição fluida em grade responsiva com paginação.
@@ -19,6 +19,9 @@ Uma aplicação web interativa, moderna e responsiva para **avaliação detalhad
 - **Gráficos Dinâmicos (Chart.js):**
   - Média de notas por década de lançamento.
   - Linha de correlação entre Nota Média x Ano de Lançamento de todos os álbuns.
+  - Volume de audições e evolução temporal da nota média, com linha de tendência.
+  - Distribuição das faixas favoritas entre o início, meio e fim dos álbuns.
+- **Mapa de Atividade:** Heatmap dos últimos 12 meses com intensidade diária e tooltip de quantidade de registros.
 
 ### 🔒 3. Lockscreen & Autenticação (Estilo Windows)
 - **Tela de Bloqueio Interativa:** Relógio digital em tempo real, data formatada, citações musicais inspiradoras e **saudação dinâmica** (Bom dia ☀️, Boa tarde 🌤️, Boa noite 🌙).

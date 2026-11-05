@@ -595,6 +595,8 @@ let reaudicaoEvolucaoChart = null;
 let reaudicaoComparacaoChart = null;
 let graficoEvolucaoBandas = null;
 let graficoNotaAno = null;
+let graficoTendenciaTemporal = null;
+let graficoPosicaoFaixas = null;
 let registrosEstatisticas = [];
 let albunsEvolucaoDisponiveis = [];
 let bandaEvolucaoSelecionada = null;
@@ -2110,6 +2112,7 @@ function iniciarAvaliacaoCompleta(fonteSelecionada) {
     document.getElementById('album-banda').value = albumOriginal.banda || '';
     document.getElementById('album-ano').value = albumOriginal.ano || '';
     document.getElementById('album-favorita').value = albumOriginal.favorita || '';
+    document.getElementById('album-subgenero').value = albumOriginal.subgenero || '';
     if (String(albumOriginal.imagem || '').startsWith('data:image/')) {
       imagemBase64Temp = albumOriginal.imagem;
       document.getElementById('album-imagem').value = '';
@@ -2540,6 +2543,7 @@ function abrirEdicaoReaudicao(id) {
   document.getElementById('album-banda').value = item.banda || '';
   document.getElementById('album-ano').value = item.ano || '';
   document.getElementById('album-favorita').value = item.favorita || '';
+  document.getElementById('album-subgenero').value = item.subgenero || '';
   document.getElementById('album-obs').value = item.observacoes || item.obs || '';
   document.getElementById('album-duracao').value = item.duracao || '';
   definirTimerAudicao(item.duracaoSegundos || 0, obterSufixoTimerReaudicao(item));
@@ -3207,6 +3211,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     const ano = Number(document.getElementById('album-ano').value);
     const urlImagemInput = document.getElementById('album-imagem').value;
     const favoritaTexto = document.getElementById('album-favorita').value;
+    const subgenero = document.getElementById('album-subgenero').value;
     const obs = document.getElementById('album-obs').value;
     const duracaoInformada = document.getElementById('album-duracao').value.trim();
     const duracao = timerAudicaoSegundos > 0 ? formatarDuracao(timerAudicaoSegundos) : duracaoInformada;
@@ -3254,7 +3259,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       : null;
     if (salvandoReaudicao) {
       const registroHistorico = {
-        nome, banda, ano, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
+        nome, banda, ano, subgenero, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp, duracao, duracaoSegundos,
         userId: usuarioAtual.uid,
         origem: registroEmEdicao?.origem || (reaudicaoAlbumOriginal?.tipoCatalogo === 'caderno' ? 'caderno_antigo' : (reaudicaoAlbumOriginal ? 'album_principal' : 'avaliacao_manual')),
@@ -3282,7 +3287,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       mostrarToast('Ré-audição salva no histórico!');
     } else if (id) {
       const updateData = {
-        nome, banda, ano, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
+        nome, banda, ano, subgenero, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp, duracao, duracaoSegundos, atualizadoEm: agoraISO
       };
       await updateDoc(doc(db, "albuns", id), updateData);
@@ -3290,7 +3295,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     } else {
       const idadeCadastro = calcularIdade(new Date());
       const novoData = {
-        nome, banda, ano, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
+        nome, banda, ano, subgenero, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp,
         duracao,
         duracaoSegundos,
@@ -3417,8 +3422,9 @@ window.aplicarFiltrosEBuscar = function() {
   albunsFiltrados = todosOsAlbuns.filter(album => {
     const bateNome = (album.nome || '').toLowerCase().includes(termo);
     const bateBanda = (album.banda || '').toLowerCase().includes(termo);
+    const bateSubgenero = (album.subgenero || '').toLowerCase().includes(termo);
     const bateAno = anoFiltro ? album.ano == anoFiltro : true;
-    return (bateNome || bateBanda) && bateAno;
+    return (bateNome || bateBanda || bateSubgenero) && bateAno;
   });
 
   albunsFiltrados.sort((a, b) => {
@@ -3460,6 +3466,12 @@ function renderizarPagina() {
 
     const temObs = data.obs && data.obs.trim().length > 0;
     const duracaoAlbum = String(data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '')).trim();
+    const faixasParaBaixar = Array.isArray(data.faixas)
+      ? data.faixas.reduce((indices, faixa, indice) => {
+        if (faixa.baixar || faixa.downloadUrl) indices.push(indice + 1);
+        return indices;
+      }, [])
+      : [];
 
     const card = document.createElement('div');
     const notaBaselineCard = Number(data.notaAntiga ?? data.notaOriginal ?? data.notaCaderno ?? data.media ?? 0);
@@ -3484,7 +3496,9 @@ function renderizarPagina() {
 
       <p><strong>Soma das Notas:</strong> ${data.somaNotas ?? 'N/A'}</p>
       <p><strong>Música favorita:</strong> ${escaparHtml(data.favorita || 'N/A')}</p>
+      ${data.subgenero ? `<p><strong>Subgênero:</strong> ${escaparHtml(data.subgenero)}</p>` : ''}
       <p><strong>Faixas:</strong> ${Array.isArray(data.faixas) ? data.faixas.length : 0}</p>
+      <p class="album-download-summary"><strong>Baixar faixas:</strong> ${faixasParaBaixar.length ? faixasParaBaixar.join(', ') : 'Nenhuma faixa marcada'}</p>
       ${duracaoAlbum ? `<p><strong>Duração:</strong> ${escaparHtml(duracaoAlbum)}</p>` : ''}
       ${!data.isReaudicao && !data.isCaderno ? `<p><strong>Idade no cadastro:</strong> ${data.idadeNoCadastro ?? 'N/A'} anos</p>` : ''}
 
@@ -3547,6 +3561,7 @@ window.editarAlbum = async function(id) {
     document.getElementById('album-banda').value = data.banda || '';
     document.getElementById('album-ano').value = data.ano;
     document.getElementById('album-favorita').value = data.favorita || '';
+    document.getElementById('album-subgenero').value = data.subgenero || '';
     document.getElementById('album-obs').value = data.obs || '';
     definirTimerAudicao(data.duracaoSegundos || 0, id);
     document.getElementById('album-duracao').value = data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '');
@@ -4113,11 +4128,297 @@ function desenharGraficoEvolucaoBanda() {
   });
 }
 
-function renderizarGraficosEstatisticas(albuns, albunsTodasBandas = albuns) {
+function renderizarGraficosEstatisticas(albuns, albunsTodasBandas = albuns, registrosAtividade = albuns) {
   renderizarPaginaRanking(albuns);
   albunsEvolucaoDisponiveis = albunsTodasBandas;
   desenharGraficoEvolucaoBanda();
   renderizarGraficoNotaAno(albuns);
+  renderizarHeatmapAtividade(registrosAtividade);
+  renderizarGraficoTendenciaTemporal(registrosAtividade);
+  renderizarGraficoPosicaoFaixas(albuns);
+}
+
+function obterDataAtividade(album) {
+  return converterDataReaudicao(
+    album.dataReouvido || album.criadoEm || album.dataOriginal || album.atualizadoEm
+  );
+}
+
+function chaveDataLocal(data) {
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, '0');
+  const dia = String(data.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+function renderizarHeatmapAtividade(albuns) {
+  const grade = document.getElementById('heatmap-atividade');
+  if (!grade) return;
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const inicio = new Date(hoje);
+  inicio.setDate(inicio.getDate() - 364);
+  inicio.setDate(inicio.getDate() - inicio.getDay());
+  const inicioChave = chaveDataLocal(inicio);
+  const hojeChave = chaveDataLocal(hoje);
+  const contagemPorDia = new Map();
+  albuns.forEach((album) => {
+    const data = obterDataAtividade(album);
+    if (!data) return;
+    const chave = chaveDataLocal(data);
+    if (chave < inicioChave || chave > hojeChave) return;
+    contagemPorDia.set(chave, (contagemPorDia.get(chave) || 0) + 1);
+  });
+
+  const maximo = Math.max(0, ...contagemPorDia.values());
+  const fragmento = document.createDocumentFragment();
+
+  for (const data = new Date(inicio); data <= hoje; data.setDate(data.getDate() + 1)) {
+    const chave = chaveDataLocal(data);
+    const quantidade = contagemPorDia.get(chave) || 0;
+    const nivel = quantidade
+      ? Math.min(4, Math.max(1, Math.ceil((quantidade / maximo) * 4)))
+      : 0;
+    const quadrado = document.createElement('span');
+    const dataLegivel = new Intl.DateTimeFormat('pt-BR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    }).format(data);
+    quadrado.className = `heatmap-dia heatmap-nivel-${nivel}`;
+    quadrado.title = `${dataLegivel}: ${quantidade} ${quantidade === 1 ? 'registro' : 'registros'}`;
+    quadrado.setAttribute('aria-label', quadrado.title);
+    quadrado.setAttribute('role', 'img');
+    fragmento.appendChild(quadrado);
+  }
+
+  grade.replaceChildren(fragmento);
+}
+
+function renderizarGraficoTendenciaTemporal(albuns) {
+  if (graficoTendenciaTemporal) {
+    graficoTendenciaTemporal.destroy();
+    graficoTendenciaTemporal = null;
+  }
+
+  const canvas = document.getElementById('graficoTendenciaTemporal');
+  const resumo = document.getElementById('resumo-tendencia-temporal');
+  const meses = new Map();
+  albuns.forEach((album) => {
+    const data = obterDataAtividade(album);
+    if (!data) return;
+    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+    const periodo = meses.get(chave) || { ano: data.getFullYear(), mes: data.getMonth(), quantidade: 0, somaNotas: 0, quantidadeNotas: 0 };
+    periodo.quantidade += 1;
+    const nota = album.media === '' || album.media === null || album.media === undefined
+      ? Number.NaN
+      : Number(album.media);
+    if (Number.isFinite(nota) && nota >= 0 && nota <= 10) {
+      periodo.somaNotas += nota;
+      periodo.quantidadeNotas += 1;
+    }
+    meses.set(chave, periodo);
+  });
+
+  const chavesOrdenadas = [...meses.keys()].sort();
+  if (!chavesOrdenadas.length) {
+    if (resumo) resumo.textContent = 'Ainda não há datas de avaliação disponíveis para calcular a tendência.';
+    return;
+  }
+
+  const primeiro = meses.get(chavesOrdenadas[0]);
+  const ultimo = meses.get(chavesOrdenadas[chavesOrdenadas.length - 1]);
+  const inicio = new Date(primeiro.ano, primeiro.mes, 1);
+  const fim = new Date(ultimo.ano, ultimo.mes, 1);
+  const periodos = [];
+  for (const data = new Date(inicio); data <= fim; data.setMonth(data.getMonth() + 1)) {
+    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+    periodos.push(meses.get(chave) || {
+      ano: data.getFullYear(),
+      mes: data.getMonth(),
+      quantidade: 0,
+      somaNotas: 0,
+      quantidadeNotas: 0
+    });
+  }
+
+  const labels = periodos.map((periodo) =>
+    new Intl.DateTimeFormat('pt-BR', { month: 'short', year: '2-digit' })
+      .format(new Date(periodo.ano, periodo.mes, 1))
+  );
+  const medias = periodos.map((periodo) =>
+    periodo.quantidadeNotas ? periodo.somaNotas / periodo.quantidadeNotas : null
+  );
+  const pontosNota = medias
+    .map((nota, indice) => nota === null ? null : { x: indice, y: nota })
+    .filter(Boolean);
+
+  let linhaTendencia = periodos.map(() => null);
+  let variacaoTendencia = null;
+  if (pontosNota.length >= 2) {
+    const mediaX = pontosNota.reduce((total, ponto) => total + ponto.x, 0) / pontosNota.length;
+    const mediaY = pontosNota.reduce((total, ponto) => total + ponto.y, 0) / pontosNota.length;
+    const numerador = pontosNota.reduce((total, ponto) => total + (ponto.x - mediaX) * (ponto.y - mediaY), 0);
+    const denominador = pontosNota.reduce((total, ponto) => total + (ponto.x - mediaX) ** 2, 0);
+    const inclinacao = denominador ? numerador / denominador : 0;
+    const intercepto = mediaY - inclinacao * mediaX;
+    linhaTendencia = periodos.map((_, indice) => intercepto + inclinacao * indice);
+    variacaoTendencia = linhaTendencia[linhaTendencia.length - 1] - linhaTendencia[0];
+  }
+
+  if (resumo) {
+    if (variacaoTendencia === null) {
+      resumo.textContent = 'São necessários ao menos dois períodos com notas para estimar uma tendência.';
+    } else if (Math.abs(variacaoTendencia) < 0.05) {
+      resumo.textContent = 'A tendência estimada das notas está estável no período selecionado.';
+    } else {
+      const direcao = variacaoTendencia > 0 ? 'subindo' : 'caindo';
+      resumo.textContent = `A tendência estimada está ${direcao} ${Math.abs(variacaoTendencia).toFixed(2)} ponto(s) entre o início e o fim do período.`;
+    }
+  }
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  graficoTendenciaTemporal = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Álbuns avaliados',
+          data: periodos.map((periodo) => periodo.quantidade),
+          yAxisID: 'yVolume',
+          backgroundColor: 'rgba(182, 139, 82, 0.58)',
+          borderColor: '#b68b52',
+          borderWidth: 1,
+          borderRadius: 4
+        },
+        {
+          type: 'line',
+          label: 'Nota média',
+          data: medias,
+          yAxisID: 'yNotas',
+          borderColor: '#f0d08b',
+          backgroundColor: '#f0d08b',
+          pointBackgroundColor: '#f0d08b',
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          borderWidth: 2,
+          tension: 0.25,
+          spanGaps: true
+        },
+        {
+          type: 'line',
+          label: 'Tendência das notas',
+          data: linhaTendencia,
+          yAxisID: 'yNotas',
+          borderColor: '#c76d55',
+          backgroundColor: '#c76d55',
+          pointRadius: 0,
+          borderWidth: 2,
+          borderDash: [7, 5],
+          tension: 0,
+          spanGaps: true
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            title: (items) => items[0]?.label || '',
+            label: (context) => {
+              const valor = context.parsed.y;
+              if (valor === null || valor === undefined) return `${context.dataset.label}: sem notas`;
+              return context.dataset.yAxisID === 'yNotas'
+                ? `${context.dataset.label}: ${valor.toFixed(2)}/10`
+                : `${context.dataset.label}: ${valor}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#a7a094', maxTicksLimit: 14, maxRotation: 0 },
+          grid: { display: false }
+        },
+        yVolume: {
+          beginAtZero: true,
+          title: { display: true, text: 'Álbuns', color: '#b7b2a8' },
+          ticks: { color: '#a7a094', precision: 0 },
+          grid: { color: 'rgba(210, 195, 170, 0.08)' }
+        },
+        yNotas: {
+          position: 'right',
+          min: 0,
+          max: 10,
+          title: { display: true, text: 'Nota média (0–10)', color: '#b7b2a8' },
+          ticks: { color: '#a7a094', stepSize: 2 },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
+}
+
+function renderizarGraficoPosicaoFaixas(albuns) {
+  if (graficoPosicaoFaixas) {
+    graficoPosicaoFaixas.destroy();
+    graficoPosicaoFaixas = null;
+  }
+
+  const canvas = document.getElementById('graficoPosicaoFaixas');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const contagem = { inicio: 0, meio: 0, fim: 0 };
+  albuns.forEach((album) => {
+    const faixas = Array.isArray(album.faixas) ? album.faixas : [];
+    const posicao = Number(album.faixaFavoritaNumero) ||
+      faixas.findIndex((faixa) => faixa.favorita) + 1;
+    if (!faixas.length || posicao < 1 || posicao > faixas.length) return;
+    const terco = Math.ceil(faixas.length / 3);
+    if (posicao <= terco) contagem.inicio += 1;
+    else if (posicao > faixas.length - terco) contagem.fim += 1;
+    else contagem.meio += 1;
+  });
+
+  graficoPosicaoFaixas = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['Início', 'Meio', 'Fim'],
+      datasets: [{
+        label: 'Faixas favoritas',
+        data: [contagem.inicio, contagem.meio, contagem.fim],
+        backgroundColor: ['rgba(182, 139, 82, 0.78)', 'rgba(193, 154, 91, 0.55)', 'rgba(199, 109, 85, 0.68)'],
+        borderColor: ['#c19a5b', '#d2ad6d', '#c76d55'],
+        borderWidth: 1,
+        borderRadius: 7
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (context) => `${context.parsed.y} álbum(ns)` } }
+      },
+      scales: {
+        x: { ticks: { color: '#c9c2b5' }, grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#a7a094', precision: 0 },
+          grid: { color: 'rgba(210, 195, 170, 0.08)' }
+        }
+      }
+    }
+  });
 }
 
 function renderizarGraficoNotaAno(albuns) {
@@ -4428,7 +4729,13 @@ async function carregarEstatisticas(recarregarDados = true) {
   const albuns = bandaSelecionada === '*'
     ? albunsTodasBandas
     : albunsTodasBandas.filter((album) => (String(album.banda || '').trim() || 'Desconhecida') === bandaSelecionada);
-  renderizarGraficosEstatisticas(albuns, albunsTodasBandas);
+  let registrosAtividade = filtrarRegistrosPorOrigem(registrosEstatisticas, filtro, false);
+  if (bandaSelecionada !== '*') {
+    registrosAtividade = registrosAtividade.filter((album) =>
+      (String(album.banda || '').trim() || 'Desconhecida') === bandaSelecionada
+    );
+  }
+  renderizarGraficosEstatisticas(albuns, albunsTodasBandas, registrosAtividade);
   atualizarMetricasBandas(albuns);
 
   document.getElementById('stat-total').innerText = albuns.length;
