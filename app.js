@@ -1,10 +1,11 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import {
-  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, updateEmail
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
   getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCITjA6Cba4uvfFFa8U7eeZSeq5EaGzZOU",
@@ -19,6 +20,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const firebaseFunctions = getFunctions(app);
 if (typeof Chart !== 'undefined') {
   Chart.defaults.devicePixelRatio = window.devicePixelRatio || 1;
   Chart.defaults.color = '#b7b2a8';
@@ -111,6 +113,99 @@ function atualizarRelogioLockscreen() {
 }
 setInterval(atualizarRelogioLockscreen, 1000);
 atualizarRelogioLockscreen();
+
+const EMAIL_ADMIN_PRINCIPAL = 'matheusgustavodasilvapires@gmail.com';
+const LIMITE_FIRESTORE_GRATUITO_BYTES = 1024 * 1024 * 1024;
+const COLECOES_ARMAZENAMENTO_ADMIN = [
+  'albuns',
+  'usuarios',
+  'viagens',
+  'quadrinhos',
+  'historico_reaudicoes',
+  'reaudicoes'
+];
+const DATA_NASCIMENTO_MATHEUS = new Date(2006, 10, 12, 0, 0, 0, 0);
+const canvasChuvaAniversario = document.getElementById('birthday-rain');
+const ctxChuvaAniversario = canvasChuvaAniversario.getContext('2d');
+let gotasAniversario = [];
+let aniversarioAtivo = false;
+let backgroundCanvasPronto = false;
+
+function calcularIdadeAtual(dataAtual) {
+  let idade = dataAtual.getFullYear() - DATA_NASCIMENTO_MATHEUS.getFullYear();
+  const antesDoAniversario =
+    dataAtual.getMonth() < DATA_NASCIMENTO_MATHEUS.getMonth() ||
+    (dataAtual.getMonth() === DATA_NASCIMENTO_MATHEUS.getMonth() &&
+      dataAtual.getDate() < DATA_NASCIMENTO_MATHEUS.getDate());
+  if (antesDoAniversario) idade -= 1;
+  return idade;
+}
+
+function formatarContagemAniversario(milissegundos) {
+  const totalSegundos = Math.max(0, Math.floor(milissegundos / 1000));
+  const dias = Math.floor(totalSegundos / 86400);
+  const horas = Math.floor((totalSegundos % 86400) / 3600);
+  const minutos = Math.floor((totalSegundos % 3600) / 60);
+  const segundos = totalSegundos % 60;
+  return `Faltam ${dias} dias, ${horas} horas, ${minutos} minutos e ${segundos} segundos para o seu aniversário.`;
+}
+
+function atualizarWidgetAniversario() {
+  const widget = document.getElementById('widget-aniversario');
+  if (!widget) return;
+  const autorizado = auth.currentUser?.email === EMAIL_ADMIN_PRINCIPAL;
+  widget.classList.toggle('escondido', !autorizado);
+  if (!autorizado) {
+    aniversarioAtivo = false;
+    canvasChuvaAniversario.classList.remove('birthday-rain-active');
+    ctxChuvaAniversario.clearRect(0, 0, canvasChuvaAniversario.width, canvasChuvaAniversario.height);
+    return;
+  }
+
+  const agora = new Date();
+  const esteAno = agora.getFullYear();
+  const aniversarioEsteAno = new Date(esteAno, 10, 12, 0, 0, 0, 0);
+  const ehAniversario = agora.getMonth() === 10 && agora.getDate() === 12;
+  const proximoAniversario = agora < aniversarioEsteAno
+    ? aniversarioEsteAno
+    : new Date(esteAno + 1, 10, 12, 0, 0, 0, 0);
+  const aniversarioAnterior = agora < aniversarioEsteAno
+    ? new Date(esteAno - 1, 10, 12, 0, 0, 0, 0)
+    : aniversarioEsteAno;
+  const duracaoCiclo = proximoAniversario.getTime() - aniversarioAnterior.getTime();
+  const progresso = ehAniversario
+    ? 100
+    : Math.min(100, Math.max(0, ((agora.getTime() - aniversarioAnterior.getTime()) / duracaoCiclo) * 100));
+
+  document.getElementById('aniversario-idade').textContent = String(calcularIdadeAtual(agora));
+  document.getElementById('aniversario-progresso-texto').textContent = `${Math.floor(progresso)}%`;
+  document.getElementById('aniversario-progresso-barra').style.width = `${progresso}%`;
+  const trilho = document.getElementById('aniversario-progresso-trilho');
+  trilho.setAttribute('aria-valuenow', String(Math.floor(progresso)));
+
+  const mensagem = document.getElementById('aniversario-mensagem');
+  const chuvaAtivaAnteriormente = aniversarioAtivo;
+  aniversarioAtivo = ehAniversario;
+  widget.classList.toggle('aniversario-atual', ehAniversario);
+  canvasChuvaAniversario.classList.toggle('birthday-rain-active', ehAniversario);
+
+  if (ehAniversario) {
+    mensagem.textContent = 'Happy Birthday, Matheus! 🤘 Level Up';
+  } else {
+    mensagem.textContent = 'O próximo capítulo da sua jornada está chegando.';
+  }
+  document.getElementById('aniversario-contagem').textContent =
+    formatarContagemAniversario(proximoAniversario.getTime() - agora.getTime());
+
+  if (chuvaAtivaAnteriormente !== aniversarioAtivo && backgroundCanvasPronto) {
+    criarParticulas();
+    gotasAniversario = [];
+    criarGotasAniversario();
+  }
+}
+
+setInterval(atualizarWidgetAniversario, 1000);
+atualizarWidgetAniversario();
 
 window.desbloquearTela = function() {
   const lockscreen = document.getElementById('lockscreen');
@@ -211,6 +306,7 @@ const canvas = document.getElementById('canvas-bg');
 const ctx = canvas.getContext('2d');
 let mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 let particulas = [];
+const particulasAniversarioPorTamanho = () => window.innerWidth < 680 ? 100 : 210;
 let larguraCanvas = window.innerWidth;
 let alturaCanvas = window.innerHeight;
 const movimentoReduzido = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -228,7 +324,10 @@ window.addEventListener('mousemove', (e) => {
 });
 
 function criarParticulas() {
-  const quantidade = window.innerWidth < 680 ? 70 : 150;
+  const quantidadeBase = window.innerWidth < 680 ? 70 : 150;
+  const quantidade = aniversarioAtivo
+    ? particulasAniversarioPorTamanho()
+    : quantidadeBase;
   particulas = Array.from({ length: quantidade }, () => ({
     x: Math.random() * larguraCanvas,
     y: Math.random() * alturaCanvas,
@@ -247,7 +346,12 @@ function redimensionarCanvas() {
   canvas.width = Math.round(larguraCanvas * escala);
   canvas.height = Math.round(alturaCanvas * escala);
   ctx.setTransform(escala, 0, 0, escala, 0, 0);
+  canvasChuvaAniversario.width = Math.round(larguraCanvas * escala);
+  canvasChuvaAniversario.height = Math.round(alturaCanvas * escala);
+  ctxChuvaAniversario.setTransform(escala, 0, 0, escala, 0, 0);
   criarParticulas();
+  criarGotasAniversario();
+  backgroundCanvasPronto = true;
 }
 window.addEventListener('resize', redimensionarCanvas);
 redimensionarCanvas();
@@ -286,6 +390,80 @@ function obterCenaDoDia() {
     calor: 1,
     paleta: ['#090c12', '#191416', '#d65b38']
   };
+}
+
+function criarGotasAniversario() {
+  const quantidade = window.innerWidth < 680 ? 10 : 18;
+  gotasAniversario = Array.from({ length: quantidade }, () => ({
+    x: Math.random() * larguraCanvas,
+    y: Math.random() * alturaCanvas,
+    velocidade: 0.45 + Math.random() * 0.55,
+    oscilacao: Math.random() * Math.PI * 2,
+    rotacao: Math.random() * Math.PI,
+    tamanho: 6 + Math.random() * 3
+  }));
+}
+
+function desenharChuvaAniversario(tempo) {
+  ctxChuvaAniversario.clearRect(0, 0, larguraCanvas, alturaCanvas);
+  if (!aniversarioAtivo) return;
+
+  ctxChuvaAniversario.save();
+  gotasAniversario.forEach((gota, indice) => {
+    gota.y += gota.velocidade;
+    gota.x += Math.sin(tempo * 0.7 + gota.oscilacao) * 0.18;
+    gota.rotacao += 0.002;
+    if (gota.y > alturaCanvas + 24) {
+      gota.y = -24;
+      gota.x = Math.random() * larguraCanvas;
+    }
+
+    ctxChuvaAniversario.globalAlpha = 0.24 + Math.sin(tempo + indice) * 0.06;
+    ctxChuvaAniversario.fillStyle = indice % 3 === 0 ? '#b388ff' : '#d8b4fe';
+    ctxChuvaAniversario.save();
+    ctxChuvaAniversario.translate(gota.x, gota.y);
+    ctxChuvaAniversario.rotate(gota.rotacao);
+    ctxChuvaAniversario.beginPath();
+    ctxChuvaAniversario.moveTo(0, -gota.tamanho);
+    ctxChuvaAniversario.bezierCurveTo(gota.tamanho * 0.8, -gota.tamanho * 0.9, gota.tamanho, -gota.tamanho * 0.25, gota.tamanho * 0.72, gota.tamanho * 0.28);
+    ctxChuvaAniversario.quadraticCurveTo(0, gota.tamanho * 1.15, -gota.tamanho * 0.72, gota.tamanho * 0.28);
+    ctxChuvaAniversario.bezierCurveTo(-gota.tamanho, -gota.tamanho * 0.25, -gota.tamanho * 0.8, -gota.tamanho * 0.9, 0, -gota.tamanho);
+    ctxChuvaAniversario.fill();
+    ctxChuvaAniversario.restore();
+  });
+  ctxChuvaAniversario.restore();
+}
+
+function desenharSupernovaAniversario(largura, altura, tempo) {
+  if (!aniversarioAtivo) return;
+
+  const centroX = largura * (0.5 + Math.sin(tempo * 0.18) * 0.08);
+  const centroY = altura * 0.48;
+  const raio = Math.max(largura, altura) * (0.42 + Math.sin(tempo * 1.4) * 0.025);
+  const brilho = ctx.createRadialGradient(centroX, centroY, 0, centroX, centroY, raio);
+  brilho.addColorStop(0, 'rgba(179, 136, 255, 0.22)');
+  brilho.addColorStop(0.35, 'rgba(138, 43, 226, 0.14)');
+  brilho.addColorStop(0.72, 'rgba(123, 31, 162, 0.09)');
+  brilho.addColorStop(1, 'rgba(123, 31, 162, 0)');
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.fillStyle = brilho;
+  ctx.fillRect(0, 0, largura, altura);
+
+  for (let indice = 0; indice < 4; indice += 1) {
+    const angulo = tempo * 0.16 + indice * (Math.PI / 2);
+    const distancia = Math.min(largura, altura) * (0.2 + (indice % 2) * 0.07);
+    const x = centroX + Math.cos(angulo) * distancia;
+    const y = centroY + Math.sin(angulo) * distancia * 0.58;
+    const pulso = 5 + (Math.sin(tempo * 2 + indice) + 1) * 3;
+    ctx.beginPath();
+    ctx.fillStyle = indice % 2 === 0 ? 'rgba(179, 136, 255, 0.68)' : 'rgba(138, 43, 226, 0.52)';
+    ctx.shadowColor = indice % 2 === 0 ? '#b388ff' : '#8A2BE2';
+    ctx.shadowBlur = 18;
+    ctx.arc(x, y, pulso, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function desenharMontanha(largura, altura, tempo, cena, parallaxX, parallaxY) {
@@ -471,7 +649,16 @@ function animarFundo(timestamp = performance.now()) {
   }
   ultimaFrameFundo = timestamp;
 
-  const cena = obterCenaDoDia();
+  const cenaBase = obterCenaDoDia();
+  const cena = aniversarioAtivo
+    ? {
+      ...cenaBase,
+      vulcanismo: 1,
+      fratura: 1,
+      calor: 1,
+      paleta: ['#170f1c', '#39202e', '#e3b454']
+    }
+    : cenaBase;
   const larg = larguraCanvas;
   const alt = alturaCanvas;
   const tempo = performance.now() * 0.001;
@@ -492,6 +679,7 @@ function animarFundo(timestamp = performance.now()) {
   luz.addColorStop(1, 'rgba(7, 8, 10, 0)');
   ctx.fillStyle = luz;
   ctx.fillRect(0, 0, larg, alt);
+  desenharSupernovaAniversario(larg, alt, tempo);
 
   ctx.save();
   ctx.globalAlpha = 0.12;
@@ -509,7 +697,9 @@ function animarFundo(timestamp = performance.now()) {
   desenharFumaca(larg, alt, tempo, Math.max(cena.fratura * 0.35, cena.vulcanismo));
 
   particulas.forEach((particula) => {
-    const brasa = cena.vulcanismo > 0.12 && particula.y > alt * 0.24;
+    const brasa = aniversarioAtivo
+      ? particula.y > alt * 0.14
+      : cena.vulcanismo > 0.12 && particula.y > alt * 0.24;
     particula.x += particula.velocidadeX + Math.sin(tempo + particula.fase) * 0.12;
     particula.y += brasa ? -particula.velocidadeY * (0.8 + cena.vulcanismo) : particula.velocidadeY * 0.16;
     if (particula.x < -5) particula.x = larg + 5;
@@ -522,15 +712,26 @@ function animarFundo(timestamp = performance.now()) {
 
     const parallaxParticulaX = (mouse.x / Math.max(larg, 1) - 0.5) * 12;
     const parallaxParticulaY = (mouse.y / Math.max(alt, 1) - 0.5) * 8;
-    const brilho = particula.intensidade * (brasa ? cena.vulcanismo : 0.42);
+    const brilho = aniversarioAtivo
+      ? Math.min(0.9, particula.intensidade * (brasa ? 1.35 : 0.9))
+      : particula.intensidade * (brasa ? cena.vulcanismo : 0.42);
     ctx.beginPath();
-    ctx.fillStyle = brasa ? `rgba(255, ${Math.floor(116 + particula.intensidade * 80)}, 61, ${brilho})` : `rgba(194, 193, 184, ${brilho})`;
-    ctx.shadowColor = brasa ? '#ff673b' : 'transparent';
-    ctx.shadowBlur = brasa ? particula.raio * 5 : 0;
+    ctx.fillStyle = aniversarioAtivo
+      ? (particula.fase % 2 < 1
+        ? `rgba(255, ${Math.floor(184 + particula.intensidade * 65)}, 100, ${brilho})`
+        : `rgba(204, 139, 231, ${brilho * 0.85})`)
+      : brasa
+        ? `rgba(255, ${Math.floor(116 + particula.intensidade * 80)}, 61, ${brilho})`
+        : `rgba(194, 193, 184, ${brilho})`;
+    ctx.shadowColor = aniversarioAtivo
+      ? (particula.fase % 2 < 1 ? '#ffc45b' : '#c16de0')
+      : brasa ? '#ff673b' : 'transparent';
+    ctx.shadowBlur = aniversarioAtivo ? particula.raio * 8 : brasa ? particula.raio * 5 : 0;
     ctx.arc(particula.x + parallaxParticulaX, particula.y + parallaxParticulaY, particula.raio * (brasa ? 1.3 : 1), 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.shadowBlur = 0;
+  desenharChuvaAniversario(tempo);
   ctx.fillStyle = 'rgba(8, 9, 10, 0.24)';
   ctx.fillRect(0, alt * 0.82, larg, alt * 0.18);
 
@@ -597,6 +798,10 @@ let graficoEvolucaoBandas = null;
 let graficoNotaAno = null;
 let graficoTendenciaTemporal = null;
 let graficoPosicaoFaixas = null;
+let buscaMetadadosItunesController = null;
+let consultaDuracaoItunesController = null;
+let buscaMetadadosItunesTimer = null;
+let resultadosMetadadosItunes = [];
 let registrosEstatisticas = [];
 let albunsEvolucaoDisponiveis = [];
 let bandaEvolucaoSelecionada = null;
@@ -610,7 +815,7 @@ let timerAudicaoId = null;
 let timerAudicaoBaseSegundos = 0;
 let timerAudicaoIniciadoEm = null;
 const ITENS_POR_PAGINA = 12;
-const ADMIN_EMAILS = ['matheusgustavodasilvapires@gmail.com'];
+const ADMIN_EMAILS = [EMAIL_ADMIN_PRINCIPAL];
 const PERFIL_USERS_COLLECTION = 'usuarios';
 
 function normalizarEmail(email = '') {
@@ -695,96 +900,220 @@ async function garantirPerfilUsuario(user) {
 }
 
 async function carregarEstatisticasAdmin() {
-  try {
-    const [usuariosSnap, albunsSnap, top5Snap, viagensSnap] = await Promise.all([
-      getDocs(collection(db, PERFIL_USERS_COLLECTION)),
-      getDocs(collection(db, 'albuns')),
-      getDocs(query(collection(db, 'viagens'), where('categoria', '==', 'top5'))),
-      getDocs(collection(db, 'viagens'))
-    ]);
+  if (!usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
+    mostrarToast('Acesso de administrador obrigatório.', 'erro');
+    return;
+  }
 
-    const totalUsuarios = usuariosSnap.size;
+  const usoBancoEl = document.getElementById('admin-uso-banco');
+  const percentualEl = document.getElementById('admin-uso-banco-percentual');
+  const livreEl = document.getElementById('admin-uso-banco-livre');
+  const barraEl = document.getElementById('admin-uso-banco-barra');
+  const trilhoEl = document.getElementById('admin-uso-banco-trilho');
+  if (usoBancoEl) usoBancoEl.textContent = 'Calculando…';
+  if (percentualEl) percentualEl.textContent = 'Calculando percentual…';
+  if (livreEl) livreEl.textContent = 'Calculando espaço livre…';
+
+  try {
+    const snapshotsColecoes = await Promise.all(
+      COLECOES_ARMAZENAMENTO_ADMIN.map(async (nomeColecao) => [
+        nomeColecao,
+        await getDocs(collection(db, nomeColecao))
+      ])
+    );
+    const snapshotsPorColecao = new Map(snapshotsColecoes);
+    const usuariosSnap = snapshotsPorColecao.get(PERFIL_USERS_COLLECTION);
+    const albunsSnap = snapshotsPorColecao.get('albuns');
+    const viagensSnap = snapshotsPorColecao.get('viagens');
+    const codificadorUtf8 = new TextEncoder();
+    const bytesArmazenados = snapshotsColecoes.reduce((total, [, snapshot]) => {
+      return total + snapshot.docs.reduce((subtotal, documento) => {
+        const jsonDocumento = JSON.stringify(documento.data());
+        if (typeof jsonDocumento !== 'string') {
+          throw new TypeError(`Não foi possível serializar o documento ${documento.id}.`);
+        }
+        return subtotal + codificadorUtf8.encode(jsonDocumento).length;
+      }, 0);
+    }, 0);
+    const megabytesArmazenados = bytesArmazenados / (1024 * 1024);
+    const megabytesLimite = LIMITE_FIRESTORE_GRATUITO_BYTES / (1024 * 1024);
+    const percentualArmazenamento = (bytesArmazenados / LIMITE_FIRESTORE_GRATUITO_BYTES) * 100;
+    const megabytesLivres = Math.max(0, megabytesLimite - megabytesArmazenados);
+    const formatarMB = (valor) => new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 2,
+      useGrouping: false
+    }).format(valor);
+    const percentualVisivel = new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 3
+    }).format(percentualArmazenamento);
+    if (usoBancoEl) usoBancoEl.textContent = `${formatarMB(megabytesArmazenados)} MB / ${megabytesLimite} MB`;
+    if (percentualEl) percentualEl.textContent = `${percentualVisivel}% utilizado`;
+    if (livreEl) livreEl.textContent = `${formatarMB(megabytesLivres)} MB livres`;
+    if (barraEl) barraEl.style.width = `${Math.min(100, Math.max(0, percentualArmazenamento))}%`;
+    if (trilhoEl) trilhoEl.setAttribute('aria-valuenow', String(Math.min(100, Math.max(0, percentualArmazenamento)).toFixed(2)));
+
+    const emailsUnicos = new Set(usuariosSnap.docs
+      .map((documento) => normalizarEmail(documento.data().email))
+      .filter(Boolean));
     const totalAlbuns = albunsSnap.size;
-    const totalTop5 = top5Snap.size;
-    const totalViagens = viagensSnap.size;
-    const totalDocumentos = totalUsuarios + totalAlbuns + totalTop5 + totalViagens;
-    const usoPercentual = Math.min(100, ((totalDocumentos / 25000) * 100).toFixed(1));
+    const totalTop5 = viagensSnap.docs
+      .filter((documento) => documento.data().categoria === 'top5')
+      .length;
+    const notas = albunsSnap.docs
+      .map((documento) => Number(documento.data().media ?? documento.data().nota))
+      .filter((nota) => Number.isFinite(nota) && nota >= 0 && nota <= 10);
+    const mediaNotas = notas.length
+      ? (notas.reduce((soma, nota) => soma + nota, 0) / notas.length).toFixed(2)
+      : '-';
+    const distribuicaoNotas = Array.from({ length: 11 }, () => 0);
+    notas.forEach((nota) => {
+      distribuicaoNotas[Math.max(0, Math.min(10, Math.round(nota)))] += 1;
+    });
 
     const totalUsuariosEl = document.getElementById('admin-total-usuarios');
     const totalAlbunsEl = document.getElementById('admin-total-albuns');
     const totalTop5El = document.getElementById('admin-total-top5');
-    const usoBancoEl = document.getElementById('admin-uso-banco');
+    const mediaNotasEl = document.getElementById('admin-media-notas');
 
-    if (totalUsuariosEl) totalUsuariosEl.textContent = totalUsuarios;
+    if (totalUsuariosEl) totalUsuariosEl.textContent = String(emailsUnicos.size);
     if (totalAlbunsEl) totalAlbunsEl.textContent = totalAlbuns;
     if (totalTop5El) totalTop5El.textContent = totalTop5;
-    if (usoBancoEl) usoBancoEl.textContent = `${usoPercentual}%`;
+    if (mediaNotasEl) mediaNotasEl.textContent = mediaNotas;
 
-    const ctx = document.getElementById('graficoAdminUsoBanco')?.getContext('2d');
-    if (ctx) {
-      const labels = ['Usuários', 'Álbuns', 'Top 5', 'Viagens'];
-      const data = [totalUsuarios, totalAlbuns, totalTop5, totalViagens];
-
+    const canvasAdmin = document.getElementById('graficoAdminNotas');
+    if (canvasAdmin && typeof Chart !== 'undefined') {
       if (adminChart) adminChart.destroy();
-
-      adminChart = new Chart(ctx, {
-        type: 'doughnut',
+      adminChart = new Chart(canvasAdmin.getContext('2d'), {
+        type: 'bar',
         data: {
-          labels,
+          labels: Array.from({ length: 11 }, (_, nota) => String(nota)),
           datasets: [{
-            data,
-            backgroundColor: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444'],
-            borderWidth: 0
+            label: 'Álbuns',
+            data: distribuicaoNotas,
+            backgroundColor: Array.from({ length: 11 }, (_, nota) =>
+              `rgba(138, 43, 226, ${0.28 + (nota / 10) * 0.62})`
+            ),
+            borderColor: '#8A2BE2',
+            borderWidth: 1,
+            borderRadius: 7
           }]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          animation: false,
           plugins: {
-            legend: { labels: { color: '#e5e7eb' } }
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: (items) => `Nota ${items[0]?.label ?? '-'}`,
+                label: (item) => `${item.parsed.y} álbum(ns)`
+              }
+            }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Nota (arredondada)', color: '#c9c2b5' },
+              ticks: { color: '#b7b2a8' },
+              grid: { display: false }
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Quantidade de álbuns', color: '#c9c2b5' },
+              ticks: { color: '#b7b2a8', precision: 0 },
+              grid: { color: 'rgba(179, 136, 255, 0.12)' }
+            }
           }
         }
       });
     }
   } catch (error) {
     console.error('Erro ao carregar estatísticas do admin:', error);
+    if (usoBancoEl) usoBancoEl.textContent = 'Indisponível';
+    if (percentualEl) percentualEl.textContent = 'Não foi possível calcular';
+    if (livreEl) livreEl.textContent = 'Verifique o acesso ao Firestore';
+    if (barraEl) barraEl.style.width = '0%';
+    if (trilhoEl) trilhoEl.setAttribute('aria-valuenow', '0');
     mostrarToast('Não foi possível carregar as estatísticas de admin.', 'erro');
   }
 }
 
 async function carregarUsuariosAdmin() {
+  if (!usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
+    mostrarToast('Acesso de administrador obrigatório.', 'erro');
+    return;
+  }
+
   try {
     const usuariosSnap = await getDocs(query(collection(db, PERFIL_USERS_COLLECTION)));
     const usuarios = usuariosSnap.docs
       .map((docUsuario) => ({ id: docUsuario.id, ...docUsuario.data() }))
-      .sort((a, b) => (a.email || '').localeCompare(b.email || ''));
+      .sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')));
 
     const tbody = document.getElementById('admin-usuarios-body');
     if (!tbody) return;
 
+    tbody.replaceChildren();
     if (!usuarios.length) {
-      tbody.innerHTML = '<tr><td colspan="4">Nenhum usuário cadastrado.</td></tr>';
+      const linha = document.createElement('tr');
+      const celula = document.createElement('td');
+      celula.colSpan = 5;
+      celula.textContent = 'Nenhum usuário cadastrado.';
+      linha.appendChild(celula);
+      tbody.appendChild(linha);
       return;
     }
 
-    tbody.innerHTML = usuarios.map((usuario) => {
-      const papel = String(usuario.role || 'user').toLowerCase();
-      const tipoLabel = papel === 'admin' ? 'Administrador' : 'Usuário';
-      const ultimaAtualizacao = formatarDataHora(usuario.atualizadoEm || usuario.criadoEm);
-      const ehMesmoUsuario = usuarioAtual && usuario.uid === usuarioAtual.uid;
+    usuarios.forEach((usuario) => {
+      const linha = document.createElement('tr');
+      const papel = String(usuario.role || 'user').toLowerCase() === 'admin' ? 'admin' : 'user';
+      const ehMesmoUsuario = usuarioAtual?.uid === (usuario.uid || usuario.id);
+      const ehAdminPrincipal = normalizarEmail(usuario.email) === EMAIL_ADMIN_PRINCIPAL;
+      const valoresCelulas = [
+        usuario.email || 'Sem e-mail',
+        formatarDataHora(usuario.criadoEm),
+        formatarDataHora(usuario.atualizadoEm || usuario.criadoEm)
+      ];
 
-      return `
-        <tr>
-          <td>${usuario.email || 'Sem e-mail'}</td>
-          <td><span class="admin-role-tag ${papel === 'admin' ? 'admin' : ''}">${tipoLabel}</span></td>
-          <td>${ultimaAtualizacao}</td>
-          <td>
-            <button type="button" class="btn-alerta admin-acao" data-admin-editar="${usuario.id}">Editar</button>
-            <button type="button" class="btn-perigo admin-acao" data-admin-excluir="${usuario.id}" ${ehMesmoUsuario ? 'disabled' : ''}>Excluir</button>
-          </td>
-        </tr>
-      `;
-    }).join('');
+      const celulaEmail = document.createElement('td');
+      celulaEmail.textContent = valoresCelulas[0];
+      linha.appendChild(celulaEmail);
+
+      const celulaPapel = document.createElement('td');
+      const etiquetaPapel = document.createElement('span');
+      etiquetaPapel.className = `admin-role-tag ${papel === 'admin' ? 'admin' : ''}`;
+      etiquetaPapel.textContent = papel === 'admin' ? 'Administrador' : 'Usuário';
+      celulaPapel.appendChild(etiquetaPapel);
+      linha.appendChild(celulaPapel);
+
+      valoresCelulas.slice(1).forEach((valor) => {
+        const celula = document.createElement('td');
+        celula.textContent = valor;
+        linha.appendChild(celula);
+      });
+
+      const celulaAcoes = document.createElement('td');
+      const botaoEditar = document.createElement('button');
+      botaoEditar.type = 'button';
+      botaoEditar.className = 'btn-alerta admin-acao';
+      botaoEditar.textContent = 'Editar';
+      botaoEditar.dataset.adminEditar = usuario.id;
+      celulaAcoes.appendChild(botaoEditar);
+
+      const botaoExcluir = document.createElement('button');
+      botaoExcluir.type = 'button';
+      botaoExcluir.className = 'btn-perigo admin-acao';
+      botaoExcluir.textContent = 'Excluir';
+      botaoExcluir.dataset.adminExcluir = usuario.id;
+      botaoExcluir.disabled = ehMesmoUsuario || ehAdminPrincipal;
+      if (ehAdminPrincipal) botaoExcluir.title = 'A conta principal não pode ser excluída.';
+      else if (ehMesmoUsuario) botaoExcluir.title = 'Não é possível excluir a própria conta.';
+      celulaAcoes.appendChild(botaoExcluir);
+      linha.appendChild(celulaAcoes);
+      tbody.appendChild(linha);
+    });
   } catch (error) {
     console.error('Erro ao carregar usuários do admin:', error);
     mostrarToast('Não foi possível carregar a lista de usuários.', 'erro');
@@ -812,6 +1141,11 @@ function aplicarAcessoAdmin() {
 }
 
 async function editarUsuarioAdmin(idUsuario) {
+  if (!usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
+    mostrarToast('Acesso de administrador obrigatório.', 'erro');
+    return;
+  }
+
   try {
     const perfilDoc = await getDoc(doc(db, PERFIL_USERS_COLLECTION, idUsuario));
     if (!perfilDoc.exists()) {
@@ -820,6 +1154,7 @@ async function editarUsuarioAdmin(idUsuario) {
     }
 
     const usuario = { id: perfilDoc.id, ...perfilDoc.data() };
+    const ehAdminPrincipal = normalizarEmail(usuario.email) === EMAIL_ADMIN_PRINCIPAL;
     const inputId = document.getElementById('admin-user-id');
     const inputEmail = document.getElementById('admin-user-email');
     const inputSenha = document.getElementById('admin-user-senha');
@@ -827,9 +1162,13 @@ async function editarUsuarioAdmin(idUsuario) {
 
     if (inputId) inputId.value = usuario.id;
     if (inputEmail) inputEmail.value = usuario.email || '';
+    if (inputEmail) inputEmail.readOnly = ehAdminPrincipal;
     if (inputSenha) inputSenha.value = '';
-    if (inputSenha) inputSenha.placeholder = 'Vazia mantém a senha atual';
-    if (inputRole) inputRole.value = String(usuario.role || 'user');
+    if (inputSenha) inputSenha.placeholder = 'Vazia mantém a senha atual; mínimo 6 caracteres';
+    if (inputRole) {
+      inputRole.value = ehAdminPrincipal ? 'admin' : (String(usuario.role || 'user').toLowerCase() === 'admin' ? 'admin' : 'user');
+      inputRole.disabled = ehAdminPrincipal;
+    }
 
     window.navegarPara('sec-admin');
   } catch (error) {
@@ -841,22 +1180,37 @@ async function editarUsuarioAdmin(idUsuario) {
 async function excluirUsuarioAdmin(idUsuario) {
   if (!idUsuario) return;
 
+  if (!usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
+    mostrarToast('Acesso de administrador obrigatório.', 'erro');
+    return;
+  }
   if (usuarioAtual && idUsuario === usuarioAtual.uid) {
     mostrarToast('Você não pode excluir sua própria conta no painel admin.', 'erro');
     return;
   }
 
-  const confirmar = window.confirm('Tem certeza que deseja remover este usuário do painel?');
-  if (!confirmar) return;
-
   try {
-    await deleteDoc(doc(db, PERFIL_USERS_COLLECTION, idUsuario));
-    mostrarToast('Usuário removido do painel de administração.');
+    const perfilSnap = await getDoc(doc(db, PERFIL_USERS_COLLECTION, idUsuario));
+    if (!perfilSnap.exists()) {
+      mostrarToast('Usuário não encontrado.', 'erro');
+      return;
+    }
+    if (normalizarEmail(perfilSnap.data().email) === EMAIL_ADMIN_PRINCIPAL) {
+      mostrarToast('A conta principal de administrador é protegida e não pode ser excluída.', 'erro');
+      return;
+    }
+    if (!window.confirm('Tem certeza que deseja excluir esta conta e seu perfil de acesso?')) return;
+
+    await httpsCallable(firebaseFunctions, 'gerenciarUsuarioAdmin')({
+      action: 'delete',
+      uid: idUsuario
+    });
+    mostrarToast('Conta e perfil removidos com sucesso.');
     await carregarUsuariosAdmin();
     await carregarEstatisticasAdmin();
   } catch (error) {
     console.error('Erro ao excluir usuário admin:', error);
-    mostrarToast('Não foi possível excluir este usuário.', 'erro');
+    mostrarToast(error.message || 'Não foi possível excluir este usuário.', 'erro');
   }
 }
 
@@ -876,10 +1230,14 @@ async function salvarUsuarioAdmin(event) {
   if (!inputEmail || !inputSenha || !inputRole) return;
 
   const email = inputEmail.value.trim();
-  const senha = inputSenha.value.trim();
+  const senha = inputSenha.value;
   const role = inputRole.value;
 
   const idUsuario = inputId ? inputId.value : '';
+  if (!['user', 'admin'].includes(role)) {
+    mostrarToast('Selecione um nível de acesso válido.', 'erro');
+    return;
+  }
   if (inputSenha) inputSenha.placeholder = idUsuario ? 'Vazia mantém a senha atual' : 'Obrigatória para nova conta';
 
   if (!email || (!idUsuario && !senha)) {
@@ -887,52 +1245,41 @@ async function salvarUsuarioAdmin(event) {
     return;
   }
 
-  if (idUsuario) {
-    try {
-      const perfilRef = doc(db, PERFIL_USERS_COLLECTION, idUsuario);
-      await updateDoc(perfilRef, {
-        email,
-        role,
-        atualizadoEm: serverTimestamp()
-      });
-
-      if (usuarioAtual && idUsuario === usuarioAtual.uid) {
-        const userAtual = auth.currentUser;
-        if (userAtual && userAtual.email !== email) {
-          await updateEmail(userAtual, email);
-        }
-      } else {
-        mostrarToast('Perfil atualizado no painel. A senha não foi alterada.', 'sucesso');
-      }
-
-      if (usuarioAtual && idUsuario === usuarioAtual.uid) mostrarToast('Usuário atualizado. A senha não foi alterada.');
-    } catch (error) {
-      console.error('Erro ao atualizar usuário:', error);
-      mostrarToast('Não foi possível atualizar este usuário. A senha não foi alterada.', 'erro');
-    }
-  } else {
-    try {
-      const novoUsuario = await createUserWithEmailAndPassword(auth, email, senha);
-      await setDoc(doc(db, PERFIL_USERS_COLLECTION, novoUsuario.user.uid), {
-        uid: novoUsuario.user.uid,
-        email: novoUsuario.user.email || email,
-        role,
-        criadoEm: serverTimestamp(),
-        atualizadoEm: serverTimestamp(),
-        ultimoLogin: serverTimestamp()
-      });
-      mostrarToast('Usuário criado com sucesso.');
-    } catch (error) {
-      console.error('Erro ao criar usuário:', error);
-      mostrarToast('Não foi possível criar este usuário.', 'erro');
-    }
+  if (senha && senha.length < 6) {
+    mostrarToast('A senha precisa ter pelo menos 6 caracteres.', 'erro');
+    return;
   }
 
-  document.getElementById('form-admin-usuario')?.reset();
-  document.getElementById('admin-user-id').value = '';
-  document.getElementById('admin-user-senha').placeholder = 'Obrigatória para nova conta';
-  await carregarUsuariosAdmin();
-  await carregarEstatisticasAdmin();
+  try {
+    const acao = idUsuario ? 'update' : 'create';
+    await httpsCallable(firebaseFunctions, 'gerenciarUsuarioAdmin')({
+      action: acao,
+      uid: idUsuario || undefined,
+      email,
+      password: senha || undefined,
+      role
+    });
+
+    if (usuarioAtual && idUsuario === usuarioAtual.uid && auth.currentUser) {
+      await auth.currentUser.reload();
+      usuarioAtual = auth.currentUser;
+      perfilUsuarioAtual = await garantirPerfilUsuario(usuarioAtual);
+      aplicarAcessoAdmin();
+    }
+
+    const formAdmin = document.getElementById('form-admin-usuario');
+    formAdmin?.reset();
+    if (inputId) inputId.value = '';
+    if (inputEmail) inputEmail.readOnly = false;
+    if (inputRole) inputRole.disabled = false;
+    if (inputSenha) inputSenha.placeholder = 'Obrigatória para nova conta';
+    mostrarToast(idUsuario ? 'Usuário atualizado com sucesso.' : 'Usuário criado com sucesso.');
+    await carregarUsuariosAdmin();
+    await carregarEstatisticasAdmin();
+  } catch (error) {
+    console.error('Erro ao salvar usuário admin:', error);
+    mostrarToast(error.message || 'Não foi possível salvar as alterações da conta.', 'erro');
+  }
 }
 
 function mostrarToast(mensagem, tipo = 'sucesso') {
@@ -1021,6 +1368,11 @@ document.getElementById('btn-toggle-pass').addEventListener('click', () => {
 });
 
 window.navegarPara = function(idTela) {
+  if (idTela === 'sec-admin' && !usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
+    mostrarToast('Acesso de administrador negado.', 'erro');
+    idTela = 'sec-dashboard';
+  }
+
   fecharFormulariosSecundarios();
   document.querySelectorAll('.tela').forEach(t => t.classList.add('escondido'));
   const telaDestino = document.getElementById(idTela);
@@ -1060,7 +1412,9 @@ window.prepararNovoAlbum = function() {
   reaudicaoModoAtivo = false;
   reaudicaoAlbumOriginal = null;
   reaudicaoEditandoId = null;
+  limparBuscaMetadadosItunes();
   document.getElementById('form-album').reset();
+  definirQuantidadeFaixasApi(null);
   document.getElementById('album-id').value = '';
   document.getElementById('container-faixas').innerHTML = '';
   document.getElementById('preview-container').classList.add('escondido');
@@ -1071,6 +1425,325 @@ window.prepararNovoAlbum = function() {
   addLinhaFaixa();
   navegarPara('sec-novo-album');
 };
+
+function limparBuscaMetadadosItunes() {
+  if (buscaMetadadosItunesTimer) {
+    clearTimeout(buscaMetadadosItunesTimer);
+    buscaMetadadosItunesTimer = null;
+  }
+  if (buscaMetadadosItunesController) {
+    buscaMetadadosItunesController.abort();
+    buscaMetadadosItunesController = null;
+  }
+  if (consultaDuracaoItunesController) {
+    consultaDuracaoItunesController.abort();
+    consultaDuracaoItunesController = null;
+  }
+  resultadosMetadadosItunes = [];
+  const resultados = document.getElementById('resultados-metadados-itunes');
+  const status = document.getElementById('status-busca-metadados');
+  const botao = document.getElementById('btn-buscar-metadados');
+  if (resultados) {
+    resultados.replaceChildren();
+    resultados.classList.add('escondido');
+  }
+  if (status) status.textContent = '';
+  if (botao) botao.disabled = false;
+}
+
+function obterCapaItunesAltaResolucao(urlCapa) {
+  return String(urlCapa || '').replace(/100x100bb/gi, '600x600bb');
+}
+
+function renderizarResultadosMetadadosItunes(resultados) {
+  const lista = document.getElementById('resultados-metadados-itunes');
+  if (!lista) return;
+
+  lista.replaceChildren();
+  resultados.forEach((album, indice) => {
+    const opcao = document.createElement('button');
+    opcao.type = 'button';
+    opcao.className = 'resultado-metadados-itunes';
+    opcao.dataset.indice = String(indice);
+    opcao.setAttribute('role', 'option');
+    opcao.setAttribute('aria-selected', 'false');
+
+    const imagem = document.createElement('img');
+    imagem.alt = '';
+    imagem.loading = 'lazy';
+    const urlCapa = obterCapaItunesAltaResolucao(album.artworkUrl100);
+    if (urlCapa) imagem.src = urlCapa;
+    else imagem.classList.add('escondido');
+
+    const detalhes = document.createElement('span');
+    detalhes.className = 'resultado-metadados-detalhes';
+    const titulo = document.createElement('strong');
+    titulo.textContent = album.collectionName || 'Álbum sem nome';
+    const artista = document.createElement('span');
+    artista.textContent = album.artistName || 'Artista desconhecido';
+    const ano = document.createElement('small');
+    ano.textContent = String(album.releaseDate || '').slice(0, 4) || 'Ano indisponível';
+    const quantidadeFaixas = Number(album.trackCount);
+    const faixas = document.createElement('small');
+    faixas.textContent = Number.isInteger(quantidadeFaixas) && quantidadeFaixas > 0
+      ? `${quantidadeFaixas} faixas`
+      : 'Quantidade de faixas será consultada ao selecionar';
+    detalhes.append(titulo, artista, ano, faixas);
+    opcao.append(imagem, detalhes);
+    lista.appendChild(opcao);
+  });
+  lista.classList.toggle('escondido', resultados.length === 0);
+}
+
+async function consultarAlbunsItunes(termo, signal) {
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(termo)}&entity=album&limit=200`;
+  const resposta = await fetch(url, { signal });
+  if (!resposta.ok) {
+    throw new Error(`A busca no iTunes retornou HTTP ${resposta.status}.`);
+  }
+
+  const dados = await resposta.json();
+  if (!Array.isArray(dados.results)) {
+    throw new Error('A resposta do iTunes não contém uma lista de álbuns válida.');
+  }
+
+  return dados.results.filter((album) =>
+    album && album.collectionName && album.artistName
+  );
+}
+
+function criarTermosFallbackItunes(termoCompleto, nomeAlbum, artista) {
+  const candidatos = [artista, nomeAlbum];
+  const palavras = termoCompleto.split(/\s+/).filter(Boolean);
+
+  if (palavras.length > 2) {
+    candidatos.push(palavras.slice(0, -1).join(' '));
+    candidatos.push(palavras.slice(0, Math.max(2, palavras.length - 2)).join(' '));
+  } else if (palavras.length === 2) {
+    candidatos.push(palavras[0]);
+  }
+
+  const termoPrincipal = termoCompleto.toLocaleLowerCase('pt-BR');
+  return [...new Set(candidatos
+    .map((termo) => String(termo || '').trim())
+    .filter((termo) => termo.length >= 2 && termo.toLocaleLowerCase('pt-BR') !== termoPrincipal))]
+    .slice(0, 3);
+}
+
+async function buscarMetadadosItunes() {
+  const nomeAlbum = document.getElementById('album-nome').value.trim();
+  const artista = document.getElementById('album-banda').value.trim();
+  const termo = [nomeAlbum, artista]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  const status = document.getElementById('status-busca-metadados');
+  const botao = document.getElementById('btn-buscar-metadados');
+
+  if (termo.length < 2) {
+    if (status) status.textContent = 'Digite o nome do álbum ou artista para buscar.';
+    return;
+  }
+
+  if (buscaMetadadosItunesController) buscaMetadadosItunesController.abort();
+  const controller = new AbortController();
+  buscaMetadadosItunesController = controller;
+  resultadosMetadadosItunes = [];
+  renderizarResultadosMetadadosItunes([]);
+  if (status) status.textContent = 'Buscando álbuns no iTunes…';
+  if (botao) botao.disabled = true;
+
+  try {
+    const resultadosPrincipais = await consultarAlbunsItunes(termo, controller.signal);
+    const resultadosUnicos = new Map();
+    resultadosPrincipais.forEach((album) => {
+      const chave = album.collectionId || `${album.artistName}:${album.collectionName}`;
+      resultadosUnicos.set(chave, album);
+    });
+
+    if (resultadosPrincipais.length < 200) {
+      const termosFallback = criarTermosFallbackItunes(termo, nomeAlbum, artista);
+      const respostasFallback = await Promise.all(termosFallback.map(async (termoFallback) => {
+        try {
+          return await consultarAlbunsItunes(termoFallback, controller.signal);
+        } catch (erroFallback) {
+          if (erroFallback.name === 'AbortError') throw erroFallback;
+          console.warn(`Busca de fallback no iTunes falhou para "${termoFallback}":`, erroFallback);
+          return [];
+        }
+      }));
+
+      respostasFallback.flat().forEach((album) => {
+        const chave = album.collectionId || `${album.artistName}:${album.collectionName}`;
+        if (!resultadosUnicos.has(chave)) resultadosUnicos.set(chave, album);
+      });
+    }
+
+    resultadosMetadadosItunes = [...resultadosUnicos.values()].slice(0, 200);
+    renderizarResultadosMetadadosItunes(resultadosMetadadosItunes);
+    if (status) {
+      status.textContent = resultadosMetadadosItunes.length
+        ? `${resultadosMetadadosItunes.length} resultado(s). Selecione um álbum para preencher os campos.`
+        : 'Nenhum álbum encontrado. Você pode preencher os campos manualmente.';
+    }
+  } catch (erro) {
+    if (erro.name !== 'AbortError') {
+      console.error('Erro ao buscar metadados no iTunes:', erro);
+      if (status) status.textContent = 'Não foi possível consultar o iTunes. Tente novamente ou preencha manualmente.';
+    }
+  } finally {
+    if (buscaMetadadosItunesController === controller) {
+      buscaMetadadosItunesController = null;
+      if (botao) botao.disabled = false;
+    }
+  }
+}
+
+function selecionarMetadadosItunes(indice) {
+  const album = resultadosMetadadosItunes[indice];
+  if (!album) return;
+  if (consultaDuracaoItunesController) consultaDuracaoItunesController.abort();
+
+  const nome = document.getElementById('album-nome');
+  const banda = document.getElementById('album-banda');
+  const ano = document.getElementById('album-ano');
+  const imagem = document.getElementById('album-imagem');
+  const urlCapa = obterCapaItunesAltaResolucao(album.artworkUrl100);
+  const anoLancamento = String(album.releaseDate || '').match(/^\d{4}/)?.[0] || '';
+  const duracaoAntesDaBusca = document.getElementById('album-duracao').value;
+  const quantidadeFaixas = Number(album.trackCount);
+
+  nome.value = album.collectionName;
+  banda.value = album.artistName;
+  if (anoLancamento) ano.value = anoLancamento;
+  definirQuantidadeFaixasApi(
+    Number.isInteger(quantidadeFaixas) && quantidadeFaixas > 0
+      ? quantidadeFaixas
+      : null
+  );
+  if (urlCapa) {
+    imagem.value = urlCapa;
+    imagemBase64Temp = '';
+    document.getElementById('album-file').value = '';
+    document.getElementById('img-preview').src = urlCapa;
+    document.getElementById('preview-container').classList.remove('escondido');
+  }
+  document.getElementById('status-busca-metadados').textContent =
+    'Metadados preenchidos. Você ainda pode editar os campos manualmente.';
+  document.getElementById('resultados-metadados-itunes').classList.add('escondido');
+  if (album.collectionId) buscarDuracaoMetadadosItunes(album, duracaoAntesDaBusca);
+  else {
+    document.getElementById('status-busca-metadados').textContent =
+      'Metadados preenchidos; minutagem indisponível no iTunes. Você pode digitá-la manualmente.';
+  }
+}
+
+function definirQuantidadeFaixasApi(quantidade) {
+  const campo = document.getElementById('album-quantidade-faixas-api');
+  const resumo = document.getElementById('album-quantidade-faixas-api-resumo');
+  if (!campo || !resumo) return;
+
+  const total = Number(quantidade);
+  if (!Number.isInteger(total) || total < 1) {
+    campo.value = '';
+    resumo.textContent = '';
+    resumo.classList.add('escondido');
+    return;
+  }
+
+  campo.value = String(total);
+  resumo.textContent = `🎵 ${total} ${total === 1 ? 'faixa' : 'faixas'} retornadas pela API`;
+  resumo.classList.remove('escondido');
+}
+
+async function buscarDuracaoMetadadosItunes(album, duracaoAntesDaBusca) {
+  const controller = new AbortController();
+  consultaDuracaoItunesController = controller;
+  const status = document.getElementById('status-busca-metadados');
+  if (status) status.textContent = 'Metadados preenchidos; buscando a minutagem das faixas…';
+
+  try {
+    const url = `https://itunes.apple.com/lookup?id=${encodeURIComponent(album.collectionId)}&entity=song&limit=200`;
+    const resposta = await fetch(url, { signal: controller.signal });
+    if (!resposta.ok) {
+      throw new Error(`A consulta de faixas no iTunes retornou HTTP ${resposta.status}.`);
+    }
+
+    const dados = await resposta.json();
+    if (!Array.isArray(dados.results)) {
+      throw new Error('A resposta do iTunes não contém uma lista de faixas válida.');
+    }
+
+    const duracaoTotalMs = dados.results.reduce((total, faixa) => {
+      const duracao = Number(faixa.trackTimeMillis);
+      return faixa.wrapperType === 'track' && Number.isFinite(duracao) && duracao > 0
+        ? total + duracao
+        : total;
+    }, 0);
+    const totalFaixas = dados.results.filter((faixa) =>
+      faixa.wrapperType === 'track'
+    ).length;
+    if (totalFaixas) definirQuantidadeFaixasApi(totalFaixas);
+    if (!duracaoTotalMs) {
+      if (status) status.textContent = 'Metadados preenchidos; minutagem indisponível no iTunes. Você pode digitá-la manualmente.';
+      return;
+    }
+
+    const campoDuracao = document.getElementById('album-duracao');
+    if (campoDuracao.value === duracaoAntesDaBusca) {
+      campoDuracao.value = formatarDuracao(Math.round(duracaoTotalMs / 1000));
+      if (status) status.textContent = 'Metadados e minutagem preenchidos. Os campos continuam editáveis.';
+    } else if (status) {
+      status.textContent = 'Metadados preenchidos; a minutagem digitada manualmente foi mantida.';
+    }
+  } catch (erro) {
+    if (erro.name !== 'AbortError') {
+      console.error('Erro ao buscar a minutagem do álbum no iTunes:', erro);
+      if (status) status.textContent = 'Metadados preenchidos; não foi possível obter a minutagem. Você pode digitá-la manualmente.';
+    }
+  } finally {
+    if (consultaDuracaoItunesController === controller) {
+      consultaDuracaoItunesController = null;
+    }
+  }
+}
+
+document.getElementById('btn-buscar-metadados').addEventListener('click', () => {
+  if (buscaMetadadosItunesTimer) {
+    clearTimeout(buscaMetadadosItunesTimer);
+    buscaMetadadosItunesTimer = null;
+  }
+  buscarMetadadosItunes();
+});
+function agendarBuscaMetadadosItunes() {
+  if (buscaMetadadosItunesTimer) clearTimeout(buscaMetadadosItunesTimer);
+  if (buscaMetadadosItunesController) {
+    buscaMetadadosItunesController.abort();
+    buscaMetadadosItunesController = null;
+  }
+  if (consultaDuracaoItunesController) {
+    consultaDuracaoItunesController.abort();
+    consultaDuracaoItunesController = null;
+  }
+  definirQuantidadeFaixasApi(null);
+  document.getElementById('btn-buscar-metadados').disabled = false;
+  document.getElementById('resultados-metadados-itunes').classList.add('escondido');
+  if (document.getElementById('album-nome').value.trim().length < 2) {
+    document.getElementById('status-busca-metadados').textContent = '';
+    return;
+  }
+  document.getElementById('status-busca-metadados').textContent = 'Atualizando busca…';
+  buscaMetadadosItunesTimer = setTimeout(() => {
+    buscaMetadadosItunesTimer = null;
+    buscarMetadadosItunes();
+  }, 550);
+}
+document.getElementById('album-nome').addEventListener('input', agendarBuscaMetadadosItunes);
+document.getElementById('album-banda').addEventListener('input', agendarBuscaMetadadosItunes);
+document.getElementById('resultados-metadados-itunes').addEventListener('click', (evento) => {
+  const opcao = evento.target.closest('[data-indice]');
+  if (opcao) selecionarMetadadosItunes(Number(opcao.dataset.indice));
+});
 
 // AUTENTICAÇÃO
 document.getElementById('btn-register').addEventListener('click', () => {
@@ -1105,6 +1778,8 @@ if (btnLimparAdminUsuario) {
     if (formAdmin) formAdmin.reset();
     const inputId = document.getElementById('admin-user-id');
     if (inputId) inputId.value = '';
+    document.getElementById('admin-user-email').readOnly = false;
+    document.getElementById('admin-user-role').disabled = false;
     document.getElementById('admin-user-senha').placeholder = 'Obrigatória para nova conta';
   });
 }
@@ -1182,7 +1857,8 @@ onAuthStateChanged(auth, async (user) => {
 
 function formatarDataHora(valor) {
   if (!valor) return 'Sem data';
-  const data = valor.toDate ? valor.toDate() : new Date(valor);
+  const data = typeof valor.toDate === 'function' ? valor.toDate() : new Date(valor);
+  if (Number.isNaN(data.getTime())) return 'Sem data';
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(data);
 }
 
@@ -2113,6 +2789,7 @@ function iniciarAvaliacaoCompleta(fonteSelecionada) {
     document.getElementById('album-ano').value = albumOriginal.ano || '';
     document.getElementById('album-favorita').value = albumOriginal.favorita || '';
     document.getElementById('album-subgenero').value = albumOriginal.subgenero || '';
+    definirQuantidadeFaixasApi(albumOriginal.quantidadeFaixasApi || albumOriginal.faixas?.length || null);
     if (String(albumOriginal.imagem || '').startsWith('data:image/')) {
       imagemBase64Temp = albumOriginal.imagem;
       document.getElementById('album-imagem').value = '';
@@ -2544,6 +3221,7 @@ function abrirEdicaoReaudicao(id) {
   document.getElementById('album-ano').value = item.ano || '';
   document.getElementById('album-favorita').value = item.favorita || '';
   document.getElementById('album-subgenero').value = item.subgenero || '';
+  definirQuantidadeFaixasApi(item.quantidadeFaixasApi || item.faixas?.length || null);
   document.getElementById('album-obs').value = item.observacoes || item.obs || '';
   document.getElementById('album-duracao').value = item.duracao || '';
   definirTimerAudicao(item.duracaoSegundos || 0, obterSufixoTimerReaudicao(item));
@@ -3212,6 +3890,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     const urlImagemInput = document.getElementById('album-imagem').value;
     const favoritaTexto = document.getElementById('album-favorita').value;
     const subgenero = document.getElementById('album-subgenero').value;
+    const quantidadeFaixasApi = Number(document.getElementById('album-quantidade-faixas-api').value) || null;
     const obs = document.getElementById('album-obs').value;
     const duracaoInformada = document.getElementById('album-duracao').value.trim();
     const duracao = timerAudicaoSegundos > 0 ? formatarDuracao(timerAudicaoSegundos) : duracaoInformada;
@@ -3259,7 +3938,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       : null;
     if (salvandoReaudicao) {
       const registroHistorico = {
-        nome, banda, ano, subgenero, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
+        nome, banda, ano, subgenero, quantidadeFaixasApi, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp, duracao, duracaoSegundos,
         userId: usuarioAtual.uid,
         origem: registroEmEdicao?.origem || (reaudicaoAlbumOriginal?.tipoCatalogo === 'caderno' ? 'caderno_antigo' : (reaudicaoAlbumOriginal ? 'album_principal' : 'avaliacao_manual')),
@@ -3287,7 +3966,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
       mostrarToast('Ré-audição salva no histórico!');
     } else if (id) {
       const updateData = {
-        nome, banda, ano, subgenero, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
+        nome, banda, ano, subgenero, quantidadeFaixasApi, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp, duracao, duracaoSegundos, atualizadoEm: agoraISO
       };
       await updateDoc(doc(db, "albuns", id), updateData);
@@ -3295,7 +3974,7 @@ document.getElementById('form-album').addEventListener('submit', async (e) => {
     } else {
       const idadeCadastro = calcularIdade(new Date());
       const novoData = {
-        nome, banda, ano, subgenero, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
+        nome, banda, ano, subgenero, quantidadeFaixasApi, imagem: imagemFinal, favorita, faixaFavoritaNumero, obs, faixas,
         media, somaNotas, nmp,
         duracao,
         duracaoSegundos,
@@ -3466,6 +4145,8 @@ function renderizarPagina() {
 
     const temObs = data.obs && data.obs.trim().length > 0;
     const duracaoAlbum = String(data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '')).trim();
+    const totalFaixasAlbum = Number(data.quantidadeFaixasApi) ||
+      (Array.isArray(data.faixas) ? data.faixas.length : 0);
     const faixasParaBaixar = Array.isArray(data.faixas)
       ? data.faixas.reduce((indices, faixa, indice) => {
         if (faixa.baixar || faixa.downloadUrl) indices.push(indice + 1);
@@ -3497,7 +4178,7 @@ function renderizarPagina() {
       <p><strong>Soma das Notas:</strong> ${data.somaNotas ?? 'N/A'}</p>
       <p><strong>Música favorita:</strong> ${escaparHtml(data.favorita || 'N/A')}</p>
       ${data.subgenero ? `<p><strong>Subgênero:</strong> ${escaparHtml(data.subgenero)}</p>` : ''}
-      <p><strong>Faixas:</strong> ${Array.isArray(data.faixas) ? data.faixas.length : 0}</p>
+      <p class="album-quantidade-faixas">🎵 ${totalFaixasAlbum} ${totalFaixasAlbum === 1 ? 'faixa' : 'faixas'}</p>
       <p class="album-download-summary"><strong>Baixar faixas:</strong> ${faixasParaBaixar.length ? faixasParaBaixar.join(', ') : 'Nenhuma faixa marcada'}</p>
       ${duracaoAlbum ? `<p><strong>Duração:</strong> ${escaparHtml(duracaoAlbum)}</p>` : ''}
       ${!data.isReaudicao && !data.isCaderno ? `<p><strong>Idade no cadastro:</strong> ${data.idadeNoCadastro ?? 'N/A'} anos</p>` : ''}
@@ -3562,6 +4243,7 @@ window.editarAlbum = async function(id) {
     document.getElementById('album-ano').value = data.ano;
     document.getElementById('album-favorita').value = data.favorita || '';
     document.getElementById('album-subgenero').value = data.subgenero || '';
+    definirQuantidadeFaixasApi(data.quantidadeFaixasApi || null);
     document.getElementById('album-obs').value = data.obs || '';
     definirTimerAudicao(data.duracaoSegundos || 0, id);
     document.getElementById('album-duracao').value = data.duracao || (data.duracaoSegundos ? formatarDuracao(data.duracaoSegundos) : '');
@@ -4140,7 +4822,7 @@ function renderizarGraficosEstatisticas(albuns, albunsTodasBandas = albuns, regi
 
 function obterDataAtividade(album) {
   return converterDataReaudicao(
-    album.dataReouvido || album.criadoEm || album.dataOriginal || album.atualizadoEm
+    album.criadoEm || album.dataReouvido || album.dataOriginal || album.atualizadoEm
   );
 }
 
@@ -4227,21 +4909,7 @@ function renderizarGraficoTendenciaTemporal(albuns) {
     return;
   }
 
-  const primeiro = meses.get(chavesOrdenadas[0]);
-  const ultimo = meses.get(chavesOrdenadas[chavesOrdenadas.length - 1]);
-  const inicio = new Date(primeiro.ano, primeiro.mes, 1);
-  const fim = new Date(ultimo.ano, ultimo.mes, 1);
-  const periodos = [];
-  for (const data = new Date(inicio); data <= fim; data.setMonth(data.getMonth() + 1)) {
-    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
-    periodos.push(meses.get(chave) || {
-      ano: data.getFullYear(),
-      mes: data.getMonth(),
-      quantidade: 0,
-      somaNotas: 0,
-      quantidadeNotas: 0
-    });
-  }
+  const periodos = chavesOrdenadas.map((chave) => meses.get(chave));
 
   const labels = periodos.map((periodo) =>
     new Intl.DateTimeFormat('pt-BR', { month: 'short', year: '2-digit' })
@@ -4251,7 +4919,10 @@ function renderizarGraficoTendenciaTemporal(albuns) {
     periodo.quantidadeNotas ? periodo.somaNotas / periodo.quantidadeNotas : null
   );
   const pontosNota = medias
-    .map((nota, indice) => nota === null ? null : { x: indice, y: nota })
+    .map((nota, indice) => nota === null ? null : {
+      x: periodos[indice].ano * 12 + periodos[indice].mes,
+      y: nota
+    })
     .filter(Boolean);
 
   let linhaTendencia = periodos.map(() => null);
@@ -4263,7 +4934,9 @@ function renderizarGraficoTendenciaTemporal(albuns) {
     const denominador = pontosNota.reduce((total, ponto) => total + (ponto.x - mediaX) ** 2, 0);
     const inclinacao = denominador ? numerador / denominador : 0;
     const intercepto = mediaY - inclinacao * mediaX;
-    linhaTendencia = periodos.map((_, indice) => intercepto + inclinacao * indice);
+    linhaTendencia = periodos.map((periodo) =>
+      intercepto + inclinacao * (periodo.ano * 12 + periodo.mes)
+    );
     variacaoTendencia = linhaTendencia[linhaTendencia.length - 1] - linhaTendencia[0];
   }
 
@@ -4376,27 +5049,33 @@ function renderizarGraficoPosicaoFaixas(albuns) {
   const canvas = document.getElementById('graficoPosicaoFaixas');
   if (!canvas || typeof Chart === 'undefined') return;
 
-  const contagem = { inicio: 0, meio: 0, fim: 0 };
+  const contagem = new Map();
   albuns.forEach((album) => {
     const faixas = Array.isArray(album.faixas) ? album.faixas : [];
-    const posicao = Number(album.faixaFavoritaNumero) ||
-      faixas.findIndex((faixa) => faixa.favorita) + 1;
-    if (!faixas.length || posicao < 1 || posicao > faixas.length) return;
-    const terco = Math.ceil(faixas.length / 3);
-    if (posicao <= terco) contagem.inicio += 1;
-    else if (posicao > faixas.length - terco) contagem.fim += 1;
-    else contagem.meio += 1;
+    const posicaoInformada = Number(album.faixaFavoritaNumero);
+    const posicao = Number.isInteger(posicaoInformada) && posicaoInformada > 0 &&
+      (!faixas.length || posicaoInformada <= faixas.length)
+      ? posicaoInformada
+      : faixas.findIndex((faixa) => faixa.favorita) + 1;
+    if (!Number.isInteger(posicao) || posicao < 1 || (faixas.length && posicao > faixas.length)) return;
+    contagem.set(posicao, (contagem.get(posicao) || 0) + 1);
   });
+
+  const posicoesOrdenadas = [...contagem.keys()].sort((a, b) => a - b);
+  const labels = posicoesOrdenadas.map((posicao) => `Faixa ${posicao}`);
+  const totais = posicoesOrdenadas.map((posicao) => contagem.get(posicao));
+  const alturaGrafico = Math.max(260, Math.min(780, labels.length * 34 + 70));
+  canvas.parentElement.style.height = `${alturaGrafico}px`;
 
   graficoPosicaoFaixas = new Chart(canvas.getContext('2d'), {
     type: 'bar',
     data: {
-      labels: ['Início', 'Meio', 'Fim'],
+      labels,
       datasets: [{
-        label: 'Faixas favoritas',
-        data: [contagem.inicio, contagem.meio, contagem.fim],
-        backgroundColor: ['rgba(182, 139, 82, 0.78)', 'rgba(193, 154, 91, 0.55)', 'rgba(199, 109, 85, 0.68)'],
-        borderColor: ['#c19a5b', '#d2ad6d', '#c76d55'],
+        label: 'Álbuns com esta faixa favorita',
+        data: totais,
+        backgroundColor: 'rgba(182, 139, 82, 0.72)',
+        borderColor: '#c19a5b',
         borderWidth: 1,
         borderRadius: 7
       }]
@@ -4405,17 +5084,18 @@ function renderizarGraficoPosicaoFaixas(albuns) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      indexAxis: 'y',
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (context) => `${context.parsed.y} álbum(ns)` } }
+        tooltip: { callbacks: { label: (context) => `${context.parsed.x} álbum(ns)` } }
       },
       scales: {
-        x: { ticks: { color: '#c9c2b5' }, grid: { display: false } },
-        y: {
+        x: {
           beginAtZero: true,
           ticks: { color: '#a7a094', precision: 0 },
           grid: { color: 'rgba(210, 195, 170, 0.08)' }
-        }
+        },
+        y: { ticks: { color: '#c9c2b5', autoSkip: false }, grid: { display: false } }
       }
     }
   });
@@ -4670,11 +5350,87 @@ function criarRegistrosHistoricoEstatisticas(id, dado) {
   return registros;
 }
 
+function escaparCampoCSV(valor) {
+  const texto = String(valor ?? '');
+  return `"${texto.replace(/"/g, '""')}"`;
+}
+
+function formatarDataBackupCSV(valor) {
+  const data = converterDataReaudicao(valor);
+  return data
+    ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(data)
+    : '';
+}
+
+function obterNumeroFaixaFavorita(album) {
+  const numeroInformado = Number(album.faixaFavoritaNumero);
+  const faixas = Array.isArray(album.faixas) ? album.faixas : [];
+  if (Number.isInteger(numeroInformado) && numeroInformado > 0 &&
+    (!faixas.length || numeroInformado <= faixas.length)) return numeroInformado;
+  if (!faixas.length) return '';
+  const indiceFavorito = faixas.findIndex((faixa) => faixa.favorita);
+  return indiceFavorito >= 0 ? indiceFavorito + 1 : '';
+}
+
+async function exportarBackupCSV() {
+  const botao = document.getElementById('btn-exportar-backup-csv');
+  if (!usuarioAtual?.uid) {
+    mostrarToast('Entre na sua conta para exportar o backup.', 'erro');
+    return;
+  }
+
+  botao.disabled = true;
+  try {
+    await carregarEstatisticas(true);
+    if (!registrosEstatisticas.length) {
+      mostrarToast('Não há álbuns cadastrados para exportar.', 'erro');
+      return;
+    }
+
+    const linhas = [[
+      'Álbum',
+      'Artista',
+      'Nota',
+      'Data Adicionada',
+      'Última Modificação',
+      'Faixa Favorita'
+    ]];
+    registrosEstatisticas.forEach((album) => {
+      linhas.push([
+        album.nome || '',
+        album.banda || '',
+        album.media ?? album.nota ?? '',
+        formatarDataBackupCSV(album.criadoEm || album.dataReouvido),
+        formatarDataBackupCSV(album.atualizadoEm || album.criadoEm || album.dataReouvido),
+        obterNumeroFaixaFavorita(album),
+      ]);
+    });
+
+    const conteudo = linhas.map((linha) => linha.map(escaparCampoCSV).join(';')).join('\r\n');
+    const arquivo = new Blob([`\uFEFF${conteudo}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `backup-albuns-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    mostrarToast('Backup CSV exportado com sucesso.');
+  } catch (error) {
+    console.error('Erro ao exportar backup CSV:', error);
+    mostrarToast('Não foi possível exportar o backup CSV.', 'erro');
+  } finally {
+    botao.disabled = false;
+  }
+}
+
 document.getElementById('filtro-tipo-estatistica').addEventListener('change', () => {
   paginaRankingAtual = 1;
   paginaTimelineAtual = 1;
   carregarEstatisticas(true);
 });
+document.getElementById('btn-exportar-backup-csv').addEventListener('click', exportarBackupCSV);
 document.getElementById('filtro-banda-estatistica').addEventListener('change', () => {
   paginaRankingAtual = 1;
   paginaTimelineAtual = 1;

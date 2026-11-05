@@ -6,13 +6,19 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isPrimaryAdmin() {
+      return signedIn()
+        && request.auth.token.email == 'matheusgustavodasilvapires@gmail.com';
+    }
+
     function owns(data) {
       return signedIn() && data.userId == request.auth.uid;
     }
 
     function isAdmin() {
       return signedIn()
-        && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.role == 'admin';
+        && (isPrimaryAdmin()
+          || get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.role == 'admin');
     }
 
     // User-owned application data.
@@ -51,8 +57,30 @@ service cloud.firestore {
     }
 
     match /usuarios/{userId} {
-      allow create: if signedIn() && (request.auth.uid == userId || isAdmin());
-      allow read, update, delete: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if (signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.uid == userId
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.role == (isPrimaryAdmin() ? 'admin' : 'user'))
+        || (isAdmin()
+          && request.resource.data.email != 'matheusgustavodasilvapires@gmail.com');
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow update: if isAdmin()
+        && ((resource.data.email == 'matheusgustavodasilvapires@gmail.com'
+            && request.resource.data.email == 'matheusgustavodasilvapires@gmail.com'
+            && request.resource.data.role == 'admin')
+          || (resource.data.email != 'matheusgustavodasilvapires@gmail.com'
+            && request.resource.data.email != 'matheusgustavodasilvapires@gmail.com'))
+        || (signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'email', 'atualizadoEm', 'ultimoLogin'
+          ]));
+      allow delete: if isAdmin()
+        && resource.data.email != 'matheusgustavodasilvapires@gmail.com';
     }
   }
 }

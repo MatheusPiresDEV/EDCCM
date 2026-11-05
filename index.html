@@ -20,6 +20,7 @@
 
     <!-- Canvas para Animações Interativas e Wallpaper de Fundo -->
     <canvas id="canvas-bg" aria-hidden="true"></canvas>
+    <canvas id="birthday-rain" aria-hidden="true"></canvas>
     
     <!-- Mensagem de Feedback (Toast) -->
     <div id="toast" class="toast escondido"></div>
@@ -193,6 +194,11 @@
                         <div class="grupo-campo">
                             <label for="album-nome">Nome do Álbum *</label>
                             <input type="text" id="album-nome" placeholder="Ex: Master of Puppets" required>
+                            <div class="busca-metadados-acoes">
+                                <button type="button" id="btn-buscar-metadados" class="btn-secundario btn-sm">Buscar Metadados</button>
+                                <span id="status-busca-metadados" class="status-busca-metadados" aria-live="polite"></span>
+                            </div>
+                            <div id="resultados-metadados-itunes" class="resultados-metadados-itunes escondido" role="listbox" aria-label="Resultados de álbuns no iTunes"></div>
                         </div>
 
                         <div class="grupo-campo">
@@ -294,6 +300,9 @@
                         <label for="album-duracao">Duração / Tempo total do Álbum</label>
                         <input type="text" id="album-duracao" placeholder="Ex: 00:39:42 ou 40 min">
                     </div>
+
+                    <input type="hidden" id="album-quantidade-faixas-api" value="">
+                    <p id="album-quantidade-faixas-api-resumo" class="album-quantidade-faixas-api escondido" aria-live="polite"></p>
 
                     <!-- Seção de Faixas / Músicas -->
                     <div class="secao-faixas">
@@ -656,6 +665,7 @@
                     <select id="filtro-banda-estatistica" class="stats-filtro-select" aria-label="Selecionar banda para as estatísticas">
                         <option value="*" selected>Todas as bandas</option>
                     </select>
+                    <button type="button" id="btn-exportar-backup-csv" class="btn-secundario btn-sm">Exportar Backup (CSV)</button>
                 </div>
             </div>
 
@@ -871,10 +881,38 @@
 
                 <section class="container-grafico posicao-faixas-estatisticas" aria-labelledby="titulo-posicao-faixas">
                     <h3 id="titulo-posicao-faixas">Posição das Faixas Favoritas</h3>
-                    <p class="grafico-descricao">Compara em que parte do álbum suas faixas favoritas costumam aparecer.</p>
+                    <p class="grafico-descricao">Mostra quantos álbuns têm cada número de faixa marcado como favorito.</p>
                     <div class="canvas-wrapper canvas-wrapper--compact"><canvas id="graficoPosicaoFaixas"></canvas></div>
                 </section>
             </div>
+
+            <section id="widget-aniversario" class="container-grafico widget-aniversario escondido" aria-labelledby="widget-aniversario-titulo">
+                <div class="aniversario-cabecalho">
+                    <span class="aniversario-icone" aria-hidden="true">🎂</span>
+                    <div>
+                        <p class="aniversario-sobretitulo">Próximo nível</p>
+                        <h3 id="widget-aniversario-titulo">Contagem para o aniversário</h3>
+                    </div>
+                    <strong class="aniversario-idade"><span id="aniversario-idade">—</span><small>anos</small></strong>
+                </div>
+                <p id="aniversario-mensagem" class="aniversario-mensagem" aria-live="polite"></p>
+                <div class="aniversario-progresso-cabecalho">
+                    <span>Progresso do ciclo anual</span>
+                    <strong id="aniversario-progresso-texto">0%</strong>
+                </div>
+                <div
+                    class="aniversario-progresso-trilho"
+                    id="aniversario-progresso-trilho"
+                    role="progressbar"
+                    aria-label="Progresso do ciclo até o próximo aniversário"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="0"
+                >
+                    <span id="aniversario-progresso-barra" class="aniversario-progresso-barra"></span>
+                </div>
+                <p id="aniversario-contagem" class="aniversario-contagem" aria-live="polite"></p>
+            </section>
 
             <!-- Histórico de Avaliações / Timeline -->
             <div class="container-grafico timeline-estatisticas">
@@ -898,7 +936,7 @@
 
             <div class="admin-dashboard-grid">
                 <div class="admin-card stat-admin">
-                    <span class="admin-card-label">Contas</span>
+                    <span class="admin-card-label">E-mails únicos cadastrados</span>
                     <strong id="admin-total-usuarios">0</strong>
                 </div>
                 <div class="admin-card stat-admin">
@@ -910,14 +948,37 @@
                     <strong id="admin-total-top5">0</strong>
                 </div>
                 <div class="admin-card stat-admin">
-                    <span class="admin-card-label">Uso do banco</span>
-                    <strong id="admin-uso-banco">0%</strong>
+                    <span class="admin-card-label">Média das notas</span>
+                    <strong id="admin-media-notas">-</strong>
+                </div>
+                <div class="admin-card admin-storage-card">
+                    <div class="admin-storage-heading">
+                        <span class="admin-card-label">Uso aproximado do Firestore</span>
+                        <strong id="admin-uso-banco">Calculando…</strong>
+                    </div>
+                    <div
+                        id="admin-uso-banco-trilho"
+                        class="admin-storage-track"
+                        role="progressbar"
+                        aria-label="Uso aproximado do limite gratuito de armazenamento do Firestore"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
+                    >
+                        <span id="admin-uso-banco-barra" class="admin-storage-bar"></span>
+                    </div>
+                    <div class="admin-storage-details">
+                        <span id="admin-uso-banco-percentual">Calculando percentual…</span>
+                        <span id="admin-uso-banco-livre">Calculando espaço livre…</span>
+                    </div>
+                    <small class="admin-storage-note">Estimativa pelo JSON UTF-8 das coleções principais; não inclui subcoleções, índices nem overhead interno do Firestore.</small>
                 </div>
             </div>
 
             <div class="admin-chart-box">
-                <h3>Uso por categoria no banco</h3>
-                <canvas id="graficoAdminUsoBanco"></canvas>
+                <h3>Distribuição das notas dos álbuns</h3>
+                <p class="grafico-descricao">Quantidade de álbuns por faixa de nota, considerando os registros do catálogo.</p>
+                <div class="admin-chart-canvas"><canvas id="graficoAdminNotas"></canvas></div>
             </div>
 
             <div class="admin-panel">
@@ -953,8 +1014,9 @@
                         <thead>
                             <tr>
                                 <th>E-mail</th>
-                                <th>Tipo</th>
-                                <th>Última atualização</th>
+                                <th>Nível de acesso</th>
+                                <th>Data de criação</th>
+                                <th>Última modificação</th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
