@@ -43,6 +43,40 @@ service cloud.firestore {
         && request.resource.data.userId == resource.data.userId;
     }
 
+    match /garagem_registros/{registroId} {
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if owns(resource.data) || isAdmin();
+      allow update: if (owns(resource.data) || isAdmin())
+        && request.resource.data.userId == resource.data.userId;
+    }
+
+    match /garagem_viagens/{viagemId} {
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow get: if (signedIn()
+          && !exists(/databases/$(database)/documents/garagem_viagens/$(viagemId)))
+        || owns(resource.data) || isAdmin();
+      allow list, delete: if owns(resource.data) || isAdmin();
+      allow update: if (owns(resource.data) || isAdmin())
+        && request.resource.data.userId == resource.data.userId;
+    }
+
+    match /garagem_config/{userId} {
+      allow create: if signedIn() && request.auth.uid == userId
+        && request.resource.data.userId == userId;
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow update: if signedIn() && request.auth.uid == userId
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if false;
+    }
+
+    match /viagem_ativa/{userId} {
+      allow create: if signedIn() && request.auth.uid == userId
+        && request.resource.data.userId == userId;
+      allow read, delete: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow update: if signedIn() && request.auth.uid == userId
+        && request.resource.data.userId == resource.data.userId;
+    }
+
     match /historico_reaudicoes/{reaudicaoId} {
       allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
       allow read, delete: if owns(resource.data) || isAdmin();

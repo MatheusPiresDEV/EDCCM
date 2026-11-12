@@ -3,7 +3,7 @@ import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
-  getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot
+  getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 
@@ -120,6 +120,10 @@ const COLECOES_ARMAZENAMENTO_ADMIN = [
   'albuns',
   'usuarios',
   'viagens',
+  'garagem_registros',
+  'garagem_viagens',
+  'garagem_config',
+  'viagem_ativa',
   'quadrinhos',
   'historico_reaudicoes',
   'reaudicoes'
@@ -1381,6 +1385,7 @@ window.navegarPara = function(idTela) {
   const mapeamento = {
     'sec-dashboard': 'sec-dashboard',
     'sec-novo-album': 'sec-novo-album',
+    'sec-garagem': 'sec-garagem',
     'sec-top5': 'sec-top5',
     'sec-reaudicoes': 'sec-reaudicoes',
     'sec-viagens': 'sec-viagens',
@@ -1401,6 +1406,7 @@ window.navegarPara = function(idTela) {
   fecharMenuMobile();
 
   if (idTela === 'sec-dashboard') carregarAlbuns();
+  if (idTela === 'sec-garagem') renderizarGaragem();
   if (idTela === 'sec-bandas') carregarBandas();
   if (idTela === 'sec-quadrinhos') carregarQuadrinhosLivros();
   if (idTela === 'sec-estatisticas') carregarEstatisticas();
@@ -5864,3 +5870,827 @@ window.fecharModalDetalhes = function(forcar = false, evento = null) {
     modal.classList.add('escondido');
   }
 };
+
+const GARAGEM_COLECOES = {
+  config: 'garagem_config',
+  registros: 'garagem_registros',
+  viagens: 'garagem_viagens',
+  ativa: 'viagem_ativa'
+};
+const GARAGEM_POR_PAGINA = 10;
+const GARAGEM_MONITORES_PADRAO = [
+  { id: 'oleo', nome: 'Óleo do motor', intervalo: 3000 },
+  { id: 'pastilha', nome: 'Pastilha de freio', intervalo: 12000 },
+  { id: 'relacao', nome: 'Relação', intervalo: 15000 }
+];
+let garagemConfig = { odometro: 0, ciclos: {}, monitores: [] };
+let garagemRegistros = [];
+let garagemViagens = [];
+let garagemViagemAtiva = null;
+let garagemPaginaLogbook = 1;
+let garagemPaginaViagens = 1;
+let garagemUnsubs = [];
+let garagemWatchId = null;
+let garagemMaps = [];
+let garagemTimerInterval = null;
+let garagemManualRotaFallback = false;
+
+function garagemElemento(id) {
+  return document.getElementById(id);
+}
+
+function garagemDataHoje() {
+  const hoje = new Date();
+  return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+}
+
+function garagemDataMillis(data) {
+  const millis = new Date(`${data || ''}T12:00:00`).getTime();
+  return Number.isFinite(millis) ? millis : 0;
+}
+
+function garagemFormatarKm(valor) {
+  return `${Number(valor || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km`;
+}
+
+function garagemFormatarDuracao(segundos) {
+  const total = Math.max(0, Math.floor(Number(segundos) || 0));
+  const dias = Math.floor(total / 86400);
+  const horas = Math.floor((total % 86400) / 3600);
+  const minutos = Math.floor((total % 3600) / 60);
+  const seg = total % 60;
+  return `${dias}d ${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}:${String(seg).padStart(2, '0')}`;
+}
+
+function garagemTempoAtivo(viagem) {
+  const elapsed = Number(viagem?.elapsedMs || 0);
+  return elapsed + (viagem?.status === 'running' && viagem?.resumedAt ? Math.max(0, Date.now() - viagem.resumedAt) : 0);
+}
+
+function garagemEscapar(valor) {
+  return escaparHtml(String(valor ?? ''));
+}
+
+function garagemSerializarGeometria(geometria) {
+  return geometria ? JSON.stringify(geometria) : null;
+}
+
+function garagemLerGeometria(geometria) {
+  if (!geometria) return null;
+  if (typeof geometria === 'object') return geometria;
+  try {
+    return JSON.parse(geometria);
+  } catch (erro) {
+    console.error('Geometria salva inválida:', erro);
+    return null;
+  }
+}
+
+function garagemPrepararViagemFirestore(dados) {
+  const viagem = {
+    ...dados,
+    geometria: garagemSerializarGeometria(garagemLerGeometria(dados.geometria))
+  };
+  if (dados.volta && typeof dados.volta === 'object') {
+    viagem.volta = {
+      ...dados.volta,
+      geometria: garagemSerializarGeometria(garagemLerGeometria(dados.volta.geometria))
+    };
+  }
+  return viagem;
+}
+
+function garagemMonitorBase(id) {
+  const registros = garagemRegistros
+    .filter((registro) => registro.tipo === 'manutencao' && registro.monitorId === id)
+    .sort((a, b) => garagemDataMillis(b.data) - garagemDataMillis(a.data)
+      || new Date(b.atualizadoEm || b.criadoEm || 0).getTime() - new Date(a.atualizadoEm || a.criadoEm || 0).getTime());
+  return Number(registros[0]?.km || 0);
+}
+
+function garagemRenderizarMonitores() {
+  const lista = garagemElemento('garagem-monitores-lista');
+  if (!lista) return;
+  const monitores = garagemConfig.monitores || [];
+  lista.innerHTML = monitores.length ? monitores.map((monitor) => {
+    const base = garagemMonitorBase(monitor.id);
+    const perc = Math.min(100, Math.max(0, ((garagemConfig.odometro - base) / monitor.intervalo) * 100));
+    const restante = Math.max(0, monitor.intervalo - (garagemConfig.odometro - base));
+    const nivel = perc >= 85 ? 'danger' : perc >= 60 ? 'warn' : '';
+    return `<article class="garagem-monitor"><div class="garagem-monitor-head"><span>${garagemEscapar(monitor.nome)}</span><span>${garagemFormatarKm(restante)} restantes<br>limite: ${garagemFormatarKm(monitor.intervalo)}</span></div><div class="garagem-progress"><i class="${nivel}" style="width:${perc}%"></i></div><div class="garagem-monitor-foot"><span>${Math.round(perc)}% do ciclo</span><div class="garagem-monitor-actions"><button type="button" class="btn-secundario btn-sm" data-garagem-troca="${monitor.id}">Registrar troca</button><button type="button" class="btn-secundario btn-sm" data-garagem-monitor-editar="${monitor.id}">Editar</button><button type="button" class="btn-perigo btn-sm" data-garagem-monitor-excluir="${monitor.id}">Excluir</button></div></div></article>`;
+  }).join('') : '<p class="garagem-empty">Adicione as peças que deseja acompanhar.</p>';
+  garagemElemento('garagem-monitor-opcoes').innerHTML = monitores.map((monitor) => `<option value="${garagemEscapar(monitor.nome)}"></option>`).join('');
+}
+
+function garagemCombustiveisCalculados() {
+  const combustiveis = garagemRegistros.filter((registro) => registro.tipo === 'combustivel')
+    .sort((a, b) => Number(a.km) - Number(b.km) || garagemDataMillis(a.data) - garagemDataMillis(b.data));
+  return combustiveis.map((registro, index) => {
+    const anterior = combustiveis[index - 1];
+    const rodado = anterior ? Math.max(0, Number(registro.km) - Number(anterior.km)) : 0;
+    return { ...registro, kmDesdeAnterior: rodado, media: rodado > 0 && Number(registro.litros) > 0 ? rodado / Number(registro.litros) : 0, custoKm: rodado > 0 ? Number(registro.valor || 0) / rodado : 0 };
+  });
+}
+
+function garagemAtualizarPreviewCombustivel() {
+  const km = Number(garagemElemento('garagem-combustivel-km').value);
+  const litros = Number(garagemElemento('garagem-combustivel-litros').value);
+  const valor = Number(garagemElemento('garagem-combustivel-valor').value);
+  const idAtual = garagemElemento('garagem-combustivel-id').value;
+  const anterior = garagemCombustiveisCalculados()
+    .filter((registro) => registro.id !== idAtual && Number(registro.km) < km)
+    .sort((a, b) => Number(b.km) - Number(a.km))[0];
+  if (!anterior || !Number.isFinite(km) || km <= 0) {
+    garagemElemento('garagem-combustivel-calculo').textContent = 'A média será calculada a partir do próximo abastecimento.';
+    return;
+  }
+  const rodado = Math.max(0, km - Number(anterior.km));
+  const media = rodado > 0 && litros > 0 ? `${(rodado / litros).toFixed(2)} km/L` : '— km/L';
+  const custo = rodado > 0 && Number.isFinite(valor) ? (valor / rodado).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
+  garagemElemento('garagem-combustivel-calculo').textContent = `${garagemFormatarKm(rodado)} desde o último abastecimento · Média: ${media} · Custo: ${custo}/km`;
+}
+
+function garagemDataFiltrada(data) {
+  if (!data) return true;
+  const mes = garagemElemento('garagem-filtro-mes')?.value || '';
+  const ano = garagemElemento('garagem-filtro-ano')?.value || '';
+  const partes = data.split('-');
+  return (!mes || partes[1] === mes) && (!ano || partes[0] === ano);
+}
+
+function garagemRenderizarDashboard() {
+  const combustiveis = garagemCombustiveisCalculados();
+  const totalLitros = combustiveis.filter((item) => item.kmDesdeAnterior > 0).reduce((total, item) => total + Number(item.litros || 0), 0);
+  const totalRodado = combustiveis.reduce((total, item) => total + item.kmDesdeAnterior, 0);
+  const totalRodadoFiltrado = combustiveis.filter((item) => garagemDataFiltrada(item.data)).reduce((total, item) => total + item.kmDesdeAnterior, 0);
+  const gastosFiltrados = garagemRegistros.filter((item) => garagemDataFiltrada(item.data)).reduce((total, item) => total + Number(item.valor || 0), 0);
+  const viagensFiltradas = garagemViagens.filter((item) => garagemDataFiltrada(item.data));
+  const viagensKm = viagensFiltradas.reduce((total, item) => total + Number(item.distanciaKm || 0), 0);
+  garagemElemento('garagem-odo-valor').textContent = garagemFormatarKm(garagemConfig.odometro);
+  garagemElemento('garagem-odo-input').value = garagemConfig.odometro || '';
+  const monitorOleo = garagemConfig.monitores.find((monitor) => monitor.id === 'oleo' || monitor.nome.toLocaleLowerCase('pt-BR').includes('óleo'));
+  garagemElemento('garagem-oleo-restante').textContent = monitorOleo
+    ? garagemFormatarKm(Math.max(0, monitorOleo.intervalo - (garagemConfig.odometro - garagemMonitorBase(monitorOleo.id))))
+    : '— km';
+  garagemElemento('garagem-media-consumo').textContent = totalLitros > 0 && totalRodado > 0 ? `${(totalRodado / totalLitros).toFixed(1)} km/L` : '— km/L';
+  garagemElemento('garagem-total-rodado').textContent = garagemFormatarKm(totalRodadoFiltrado + viagensKm);
+  garagemElemento('garagem-total-gasto').textContent = gastosFiltrados.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const datas = [...garagemRegistros, ...garagemViagens].map((item) => item.data).filter(Boolean);
+  const meses = [...new Set(datas.map((data) => data.slice(5, 7)))].sort();
+  const anos = [...new Set(datas.map((data) => data.slice(0, 4)))].sort().reverse();
+  const selectMes = garagemElemento('garagem-filtro-mes');
+  const mesAtual = selectMes.value;
+  selectMes.innerHTML = '<option value="">Todos os meses</option>' + meses.map((mes) => `<option value="${mes}">${new Date(2000, Number(mes) - 1).toLocaleDateString('pt-BR', { month: 'long' })}</option>`).join('');
+  selectMes.value = mesAtual;
+  const selectAno = garagemElemento('garagem-filtro-ano');
+  const anoAtual = selectAno.value;
+  selectAno.innerHTML = '<option value="">Todos os anos</option>' + anos.map((ano) => `<option value="${ano}">${ano}</option>`).join('');
+  selectAno.value = anoAtual;
+  garagemRenderizarMonitores();
+}
+
+function garagemRenderizarLogbook() {
+  const combustiveis = garagemCombustiveisCalculados();
+  const registros = [
+    ...garagemRegistros.filter((item) => item.tipo !== 'combustivel'),
+    ...combustiveis
+  ].sort((a, b) => garagemDataMillis(b.data) - garagemDataMillis(a.data));
+  const totalPaginas = Math.max(1, Math.ceil(registros.length / GARAGEM_POR_PAGINA));
+  garagemPaginaLogbook = Math.min(garagemPaginaLogbook, totalPaginas);
+  const pagina = registros.slice((garagemPaginaLogbook - 1) * GARAGEM_POR_PAGINA, garagemPaginaLogbook * GARAGEM_POR_PAGINA);
+  const lista = garagemElemento('garagem-logbook-lista');
+  lista.innerHTML = pagina.length ? pagina.map((item) => {
+    const combustivel = item.tipo === 'combustivel';
+    const titulo = combustivel ? 'Abastecimento' : item.nome || 'Manutenção';
+    const detalhe = combustivel
+      ? `${item.data || 'Sem data'} · ${garagemFormatarKm(item.km)} · ${Number(item.litros || 0).toFixed(2)} L · ${item.media ? `${item.media.toFixed(2)} km/L · ${item.custoKm.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/km` : 'Sem abastecimento anterior'}`
+      : `${item.data || 'Sem data'} · ${garagemFormatarKm(item.km)} · Peças/serviço`;
+    return `<article class="garagem-entry"><div class="garagem-entry-main"><strong>${garagemEscapar(titulo)}</strong><span>${garagemEscapar(detalhe)} · ${Number(item.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div><div class="garagem-entry-actions"><button type="button" class="btn-secundario btn-sm" data-garagem-editar="${item.id}" data-garagem-tipo="${item.tipo}">Editar</button><button type="button" class="btn-perigo btn-sm" data-garagem-excluir="${item.id}">Excluir</button></div></article>`;
+  }).join('') : '<p class="garagem-empty">Nenhum abastecimento ou serviço cadastrado.</p>';
+  garagemElemento('garagem-logbook-page').textContent = `Página ${garagemPaginaLogbook} de ${totalPaginas}`;
+  garagemElemento('garagem-logbook-prev').disabled = garagemPaginaLogbook <= 1;
+  garagemElemento('garagem-logbook-next').disabled = garagemPaginaLogbook >= totalPaginas;
+}
+
+function garagemAtualizarEstatisticasViagens() {
+  const distancia = garagemViagens.reduce((total, viagem) => total + Number(viagem.distanciaKm || 0), 0);
+  const velocidade = garagemViagens.reduce((max, viagem) => Math.max(max, Number(viagem.velocidadeMaxima || 0)), 0);
+  const tempo = garagemViagens.reduce((total, viagem) => total + Number(viagem.duracaoSegundos || 0), 0);
+  garagemElemento('garagem-trip-count').textContent = String(garagemViagens.length);
+  garagemElemento('garagem-trip-distance').textContent = garagemFormatarKm(distancia);
+  garagemElemento('garagem-trip-speed').textContent = `${velocidade.toFixed(0)} km/h`;
+  garagemElemento('garagem-trip-duration').textContent = garagemFormatarDuracao(tempo);
+}
+
+function garagemRenderizarViagens() {
+  const lista = garagemElemento('garagem-viagens-lista');
+  garagemMaps.forEach((mapa) => mapa.remove());
+  garagemMaps = [];
+  const viagens = [...garagemViagens].sort((a, b) => garagemDataMillis(b.data) - garagemDataMillis(a.data));
+  const totalPaginas = Math.max(1, Math.ceil(viagens.length / GARAGEM_POR_PAGINA));
+  garagemPaginaViagens = Math.min(garagemPaginaViagens, totalPaginas);
+  const pagina = viagens.slice((garagemPaginaViagens - 1) * GARAGEM_POR_PAGINA, garagemPaginaViagens * GARAGEM_POR_PAGINA);
+  lista.innerHTML = pagina.length ? pagina.map((viagem, indice) => {
+    const uid = `garagem-mapa-${garagemPaginaViagens}-${indice}`;
+    const ida = viagem.nome || (viagem.origem && viagem.destino ? `${viagem.origem} → ${viagem.destino}` : 'Viagem de moto');
+    return `<article class="garagem-trip-card"><div class="garagem-trip-map" id="${uid}"></div><div class="garagem-trip-details"><h3>${garagemEscapar(ida)}</h3><p>${garagemEscapar(viagem.data || 'Data não informada')} · ${garagemFormatarKm(viagem.distanciaKm)}</p><p>Duração: ${garagemFormatarDuracao(viagem.duracaoSegundos)} · Velocidade média: ${Number(viagem.velocidadeMedia || 0).toFixed(1)} km/h · Máxima: ${Number(viagem.velocidadeMaxima || 0).toFixed(1)} km/h</p>${viagem.volta?.distanciaKm ? `<p>Volta: ${garagemFormatarKm(viagem.volta.distanciaKm)}</p>` : ''}<div class="garagem-trip-card-actions"><button type="button" class="btn-secundario btn-sm" data-garagem-trip-edit="${viagem.id}">Editar</button><button type="button" class="btn-perigo btn-sm" data-garagem-trip-delete="${viagem.id}">Excluir</button></div></div></article>`;
+  }).join('') : '<p class="garagem-empty">Suas viagens salvas aparecerão aqui.</p>';
+  garagemElemento('garagem-trips-page').textContent = `Página ${garagemPaginaViagens} de ${totalPaginas}`;
+  garagemElemento('garagem-trips-prev').disabled = garagemPaginaViagens <= 1;
+  garagemElemento('garagem-trips-next').disabled = garagemPaginaViagens >= totalPaginas;
+  if (typeof L === 'undefined') return;
+  pagina.forEach((viagem, indice) => {
+    const id = `garagem-mapa-${garagemPaginaViagens}-${indice}`;
+    const mapaElement = garagemElemento(id);
+    if (!mapaElement) return;
+    const mapa = L.map(mapaElement, { scrollWheelZoom: false, zoomControl: false }).setView([-14.2, -51.9], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(mapa);
+    const geometrias = [garagemLerGeometria(viagem.geometria), garagemLerGeometria(viagem.volta?.geometria)].filter(Boolean);
+    if (geometrias.length) {
+      const camada = L.featureGroup(geometrias.map((geometria, indexRota) => L.geoJSON(geometria, { style: { color: indexRota ? '#b68b52' : '#8f4b43', weight: 4 } }).addTo(mapa))).addTo(mapa);
+      mapa.fitBounds(camada.getBounds(), { padding: [12, 12] });
+    }
+    garagemMaps.push(mapa);
+  });
+}
+
+function renderizarGaragem() {
+  if (!usuarioAtual) return;
+  garagemRenderizarDashboard();
+  garagemRenderizarLogbook();
+  garagemAtualizarEstatisticasViagens();
+  garagemRenderizarViagens();
+}
+
+async function garagemSalvarConfig(alteracoes) {
+  if (!usuarioAtual) throw new Error('Faça login para salvar dados da garagem.');
+  garagemConfig = { ...garagemConfig, ...alteracoes };
+  await setDoc(doc(db, GARAGEM_COLECOES.config, usuarioAtual.uid), { ...alteracoes, userId: usuarioAtual.uid, atualizadoEm: new Date().toISOString() }, { merge: true });
+  renderizarGaragem();
+}
+
+async function garagemSalvarViagemSincronizada(dados, id) {
+  if (!usuarioAtual) throw new Error('Faça login para salvar viagens.');
+  const dadosFirestore = garagemPrepararViagemFirestore(dados);
+  const viagemRef = id ? doc(db, GARAGEM_COLECOES.viagens, id) : doc(collection(db, GARAGEM_COLECOES.viagens));
+  const configRef = doc(db, GARAGEM_COLECOES.config, usuarioAtual.uid);
+  await runTransaction(db, async (transacao) => {
+    const [viagemSnap, configSnap] = await Promise.all([transacao.get(viagemRef), transacao.get(configRef)]);
+    const configAtual = configSnap.exists() ? configSnap.data() : {};
+    const distanciaAnterior = viagemSnap.exists() ? Number(viagemSnap.data().distanciaKm || 0) : 0;
+    const odometro = Math.max(0, Number(configAtual.odometro || 0) + Number(dados.distanciaKm || 0) - distanciaAnterior);
+    transacao.set(viagemRef, { ...dadosFirestore, userId: usuarioAtual.uid, atualizadoEm: new Date().toISOString() });
+    transacao.set(configRef, { ...configAtual, userId: usuarioAtual.uid, odometro, ciclos: configAtual.ciclos || { oleo: 0, pastilha: 0, relacao: 0 }, atualizadoEm: new Date().toISOString() });
+  });
+  return viagemRef.id;
+}
+
+async function garagemExcluirViagemSincronizada(id) {
+  if (!usuarioAtual) throw new Error('Faça login para excluir viagens.');
+  const viagemRef = doc(db, GARAGEM_COLECOES.viagens, id);
+  const configRef = doc(db, GARAGEM_COLECOES.config, usuarioAtual.uid);
+  await runTransaction(db, async (transacao) => {
+    const [viagemSnap, configSnap] = await Promise.all([transacao.get(viagemRef), transacao.get(configRef)]);
+    if (!viagemSnap.exists()) return;
+    const configAtual = configSnap.exists() ? configSnap.data() : {};
+    const odometro = Math.max(0, Number(configAtual.odometro || 0) - Number(viagemSnap.data().distanciaKm || 0));
+    transacao.delete(viagemRef);
+    transacao.set(configRef, { ...configAtual, userId: usuarioAtual.uid, odometro, ciclos: configAtual.ciclos || { oleo: 0, pastilha: 0, relacao: 0 }, atualizadoEm: new Date().toISOString() });
+  });
+}
+
+async function garagemSalvarRegistro(dados, id) {
+  if (!usuarioAtual) return;
+  const referencia = id ? doc(db, GARAGEM_COLECOES.registros, id) : doc(collection(db, GARAGEM_COLECOES.registros));
+  const payload = { ...dados, userId: usuarioAtual.uid, atualizadoEm: new Date().toISOString() };
+  if (id) await updateDoc(referencia, payload);
+  else await setDoc(referencia, { ...payload, criadoEm: new Date().toISOString() });
+  if (Number(dados.km) > Number(garagemConfig.odometro || 0)) await garagemSalvarConfig({ odometro: Number(dados.km) });
+  mostrarToast(id ? 'Registro atualizado.' : 'Registro salvo.');
+}
+
+function garagemPararRastreamento() {
+  if (garagemWatchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(garagemWatchId);
+  garagemWatchId = null;
+}
+
+function garagemDistanciaEntre(a, b) {
+  const rad = (graus) => graus * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLon = rad(b.lon - a.lon);
+  const valor = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(valor), Math.sqrt(1 - valor));
+}
+
+async function garagemPersistirViagemAtiva() {
+  if (!usuarioAtual || !garagemViagemAtiva) return;
+  await setDoc(doc(db, GARAGEM_COLECOES.ativa, usuarioAtual.uid), { ...garagemViagemAtiva, userId: usuarioAtual.uid, atualizadoEm: new Date().toISOString() });
+}
+
+function garagemIniciarWatch() {
+  if (!navigator.geolocation || garagemWatchId !== null || !garagemViagemAtiva || garagemViagemAtiva.status !== 'running') return;
+  garagemElemento('garagem-gps-status').textContent = 'Aguardando sinal GPS…';
+  garagemWatchId = navigator.geolocation.watchPosition(async (posicao) => {
+    if (!garagemViagemAtiva || garagemViagemAtiva.status !== 'running') return;
+    const ponto = { lat: posicao.coords.latitude, lon: posicao.coords.longitude, timestamp: posicao.timestamp, velocidade: Math.max(0, Number(posicao.coords.speed || 0) * 3.6) };
+    const segmento = garagemViagemAtiva.segmentos[garagemViagemAtiva.segmentos.length - 1];
+    const anterior = segmento.pontos[segmento.pontos.length - 1];
+    if (anterior) {
+      const delta = garagemDistanciaEntre(anterior, ponto);
+      if (delta < 0.003 || delta > 5) return;
+      segmento.distanciaKm += delta;
+    }
+    segmento.pontos.push(ponto);
+    if (segmento.pontos.length > 3000) segmento.pontos = segmento.pontos.filter((_, indice) => indice % 2 === 0);
+    segmento.velocidadeMaxima = Math.max(segmento.velocidadeMaxima || 0, ponto.velocidade);
+    garagemViagemAtiva.velocidadeMaxima = Math.max(garagemViagemAtiva.velocidadeMaxima || 0, ponto.velocidade);
+    garagemElemento('garagem-gps-status').textContent = `GPS ativo · ${segmento.pontos.length} pontos registrados`;
+    try { await garagemPersistirViagemAtiva(); }
+    catch (erro) { console.error('Falha ao salvar ponto GPS da viagem:', erro); mostrarToast('Não foi possível salvar o ponto GPS.', 'erro'); }
+  }, (erro) => {
+    garagemElemento('garagem-gps-status').textContent = `GPS indisponível: ${erro.message}`;
+    mostrarToast(`Falha no GPS: ${erro.message}`, 'erro');
+  }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+}
+
+function garagemRenderizarBannerAtivo() {
+  const banner = garagemElemento('garagem-trip-banner');
+  const viagem = garagemViagemAtiva;
+  document.body.classList.toggle('garagem-trip-running', Boolean(viagem));
+  banner.classList.toggle('escondido', !viagem);
+  if (!viagem) {
+    garagemPararRastreamento();
+    if (garagemTimerInterval) clearInterval(garagemTimerInterval);
+    garagemTimerInterval = null;
+    return;
+  }
+  garagemElemento('garagem-trip-status').textContent = viagem.status === 'paused' ? 'Pausada / parada' : viagem.status === 'finishing' ? 'Finalizando viagem' : 'Rastreando ao vivo';
+  garagemElemento('garagem-trip-pause').textContent = viagem.status === 'paused' ? 'Retomar viagem' : 'Pausar / Parada';
+  if (viagem.status === 'running') {
+    if (garagemWatchId === null) garagemIniciarWatch();
+  } else {
+    garagemPararRastreamento();
+  }
+  if (garagemTimerInterval && viagem.status !== 'running') {
+    clearInterval(garagemTimerInterval);
+    garagemTimerInterval = null;
+  }
+  const atualizar = () => {
+    const total = Math.floor(garagemTempoAtivo(garagemViagemAtiva) / 1000);
+    garagemElemento('garagem-trip-timer').textContent = `${String(Math.floor(total / 3600)).padStart(2, '0')}:${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  };
+  atualizar();
+  if (viagem.status === 'running' && !garagemTimerInterval) garagemTimerInterval = setInterval(atualizar, 1000);
+}
+
+async function garagemPausarRetomar() {
+  if (!garagemViagemAtiva) return;
+  const viagem = { ...garagemViagemAtiva };
+  if (viagem.status === 'running') {
+    viagem.elapsedMs = garagemTempoAtivo(viagem);
+    viagem.resumedAt = null;
+    viagem.status = 'paused';
+    const atual = viagem.segmentos[viagem.segmentos.length - 1];
+    if (atual && !atual.finalizadoEm) atual.finalizadoEm = Date.now();
+    garagemPararRastreamento();
+  } else {
+    viagem.resumedAt = Date.now();
+    viagem.status = 'running';
+    const tipo = viagem.aguardandoVolta ? 'volta' : viagem.segmentos[viagem.segmentos.length - 1]?.tipo || 'ida';
+    viagem.aguardandoVolta = false;
+    viagem.segmentos.push({ tipo, iniciadoEm: Date.now(), distanciaKm: 0, velocidadeMaxima: 0, pontos: [] });
+  }
+  garagemViagemAtiva = viagem;
+  await garagemPersistirViagemAtiva();
+  garagemRenderizarBannerAtivo();
+}
+
+async function garagemRegistrarVolta() {
+  if (!garagemViagemAtiva) return;
+  const viagem = { ...garagemViagemAtiva };
+  const segmento = viagem.segmentos[viagem.segmentos.length - 1];
+  if (segmento && !segmento.finalizadoEm) segmento.finalizadoEm = Date.now();
+  viagem.elapsedMs = garagemTempoAtivo(viagem);
+  viagem.resumedAt = Date.now();
+  viagem.status = 'running';
+  viagem.aguardandoVolta = false;
+  viagem.segmentos.push({ tipo: 'volta', iniciadoEm: Date.now(), distanciaKm: 0, velocidadeMaxima: 0, pontos: [] });
+  garagemViagemAtiva = viagem;
+  await garagemPersistirViagemAtiva();
+  garagemRenderizarBannerAtivo();
+  mostrarToast('Trajeto de volta iniciado.');
+}
+
+async function garagemFinalizarViagem() {
+  if (!usuarioAtual || !garagemViagemAtiva) return;
+  garagemPararRastreamento();
+  const ativa = { ...garagemViagemAtiva };
+  ativa.elapsedMs = garagemTempoAtivo(ativa);
+  ativa.status = 'finished';
+  ativa.segmentos.forEach((segmento) => { if (!segmento.finalizadoEm) segmento.finalizadoEm = Date.now(); });
+  const segmentosIda = ativa.segmentos.filter((segmento) => segmento.tipo !== 'volta');
+  const segmentosVolta = ativa.segmentos.filter((segmento) => segmento.tipo === 'volta');
+  const combinar = (segmentos) => {
+    const pontos = segmentos.flatMap((segmento) => segmento.pontos || []);
+    const coords = pontos.map((ponto) => [ponto.lon, ponto.lat]);
+    return {
+      distanciaKm: segmentos.reduce((total, segmento) => total + Number(segmento.distanciaKm || 0), 0),
+      velocidadeMaxima: segmentos.reduce((max, segmento) => Math.max(max, Number(segmento.velocidadeMaxima || 0)), 0),
+      pontos,
+      geometria: coords.length > 1 ? { type: 'LineString', coordinates: coords } : null,
+      duracaoSegundos: Math.max(0, segmentos.reduce((total, segmento) => total + ((segmento.finalizadoEm || Date.now()) - (segmento.iniciadoEm || Date.now())), 0) / 1000)
+    };
+  };
+  const ida = combinar(segmentosIda);
+  const volta = combinar(segmentosVolta);
+  const distancia = ida.distanciaKm + volta.distanciaKm;
+  const velocidade = Math.max(ida.velocidadeMaxima, volta.velocidadeMaxima);
+  const data = garagemDataHoje();
+  const registro = {
+    userId: usuarioAtual.uid, nome: ativa.nome || 'Viagem de moto', origem: ativa.nome || 'Rastreamento GPS', destino: 'Trajeto registrado por GPS',
+    data: ativa.startedAt ? ativa.startedAt.slice(0, 10) : data, distanciaKm: distancia, duracaoSegundos: Math.floor(ativa.elapsedMs / 1000),
+    velocidadeMaxima: velocidade, velocidadeMedia: ativa.elapsedMs > 0 ? distancia / (ativa.elapsedMs / 3600000) : 0,
+    geometria: garagemSerializarGeometria(ida.geometria), pontosGPS: ida.pontos,
+    volta: volta.distanciaKm ? (() => {
+      const { pontos, ...dadosVolta } = volta;
+      return { ...dadosVolta, geometria: garagemSerializarGeometria(volta.geometria), pontosGPS: pontos };
+    })() : null,
+    criadoEm: new Date().toISOString()
+  };
+  try {
+    const referenciaAtiva = doc(db, GARAGEM_COLECOES.ativa, usuarioAtual.uid);
+    const registroId = ativa.registroId || doc(collection(db, GARAGEM_COLECOES.viagens)).id;
+    garagemViagemAtiva = { ...ativa, registroId, status: 'finishing' };
+    await garagemPersistirViagemAtiva();
+    await garagemSalvarViagemSincronizada(registro, registroId);
+    await deleteDoc(referenciaAtiva);
+    garagemViagemAtiva = null;
+    garagemRenderizarBannerAtivo();
+    mostrarToast('Viagem finalizada e odômetro atualizado.');
+  } catch (erro) {
+    console.error('Falha ao finalizar viagem:', erro);
+    mostrarToast('Não foi possível finalizar a viagem. O registro ativo foi preservado.', 'erro');
+  }
+}
+
+async function calcularRotaAutomatica(enderecos) {
+  const coords = [];
+  try {
+    for (let indice = 0; indice < enderecos.length; indice += 1) {
+      const endereco = enderecos[indice];
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(endereco)}&limit=1`, {
+        headers: { 'User-Agent': 'MusicBoxGarageApp/1.0', 'Accept-Language': 'pt-BR' }
+      });
+      if (!res.ok) throw new Error(`Falha na busca de endereço (${res.status}).`);
+      const data = await res.json();
+      if (data && data[0]) coords.push(`${data[0].lon},${data[0].lat}`);
+      else throw new Error(`Endereço não encontrado: ${endereco}`);
+      if (indice < enderecos.length - 1) await new Promise((resolve) => setTimeout(resolve, 1100));
+    }
+    if (coords.length < 2) throw new Error('Não foi possível localizar os endereços informados.');
+    const routeRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords.join(';')}?overview=full&geometries=geojson`, {
+      headers: { 'User-Agent': 'MusicBoxGarageApp/1.0' }
+    });
+    if (!routeRes.ok) throw new Error(`Falha no serviço de rotas (${routeRes.status}).`);
+    const routeData = await routeRes.json();
+    if (routeData.routes && routeData.routes[0]) {
+      return { distanciaKm: Number((routeData.routes[0].distance / 1000).toFixed(1)), duracaoSegundos: routeData.routes[0].duration, geometria: routeData.routes[0].geometry };
+    }
+    throw new Error('Não foi encontrada uma rota entre os endereços.');
+  } catch (erro) {
+    console.error('Falha ao consultar Nominatim/OSRM:', erro);
+    throw new Error('Endereço não encontrado. Verifique se digitou cidade/estado corretos ou informe a distância manualmente.');
+  }
+}
+
+async function garagemSalvarRotaManual(evento) {
+  evento.preventDefault();
+  const botao = evento.currentTarget.querySelector('button[type="submit"]');
+  botao.disabled = true;
+  botao.textContent = garagemManualRotaFallback ? 'Salvando distância…' : 'Calculando rota…';
+  try {
+    const origem = garagemElemento('garagem-manual-origem').value.trim();
+    const destino = garagemElemento('garagem-manual-destino').value.trim();
+    const paradas = garagemElemento('garagem-manual-paradas').value.split('\n').map((item) => item.trim()).filter(Boolean);
+    const incluirVolta = garagemElemento('garagem-manual-volta').checked;
+    let ida;
+    let volta = null;
+    if (garagemManualRotaFallback) {
+      const distanciaTotal = Number(garagemElemento('garagem-manual-distancia-total').value);
+      if (!Number.isFinite(distanciaTotal) || distanciaTotal <= 0) throw new Error('Informe uma distância total válida em quilômetros.');
+      ida = { distanciaKm: distanciaTotal, duracaoSegundos: 0, geometria: null };
+    } else {
+      try {
+        ida = await calcularRotaAutomatica([origem, ...paradas, destino]);
+        if (incluirVolta) {
+          const paradasVolta = garagemElemento('garagem-manual-volta-diferente').checked
+            ? garagemElemento('garagem-manual-paradas-volta').value.split('\n').map((item) => item.trim()).filter(Boolean)
+            : [...paradas].reverse();
+          volta = await calcularRotaAutomatica([destino, ...paradasVolta, origem]);
+        }
+      } catch (erroRota) {
+        garagemManualRotaFallback = true;
+        garagemElemento('garagem-manual-fallback').classList.remove('escondido');
+        garagemElemento('garagem-manual-distancia-total').required = true;
+        botao.textContent = 'Salvar distância manual';
+        mostrarToast(erroRota.message, 'erro');
+        return;
+      }
+    }
+    const distanciaKm = ida.distanciaKm + Number(volta?.distanciaKm || 0);
+    const duracaoSegundos = ida.duracaoSegundos + Number(volta?.duracaoSegundos || 0);
+    const dados = {
+      userId: usuarioAtual.uid, nome: `${origem} → ${destino}`, origem, destino, paradas, data: garagemElemento('garagem-manual-data').value || garagemDataHoje(),
+      distanciaKm, duracaoSegundos, velocidadeMaxima: 0, velocidadeMedia: duracaoSegundos > 0 ? distanciaKm / (duracaoSegundos / 3600) : 0,
+      geometria: garagemSerializarGeometria(ida.geometria),
+      volta: volta ? { ...volta, geometria: garagemSerializarGeometria(volta.geometria), paradas: garagemElemento('garagem-manual-paradas-volta').value.split('\n').map((item) => item.trim()).filter(Boolean) } : null,
+      incluiVolta: incluirVolta,
+      criadoEm: new Date().toISOString()
+    };
+    await garagemSalvarViagemSincronizada(dados);
+    evento.currentTarget.reset();
+    garagemElemento('garagem-manual-volta-campos').classList.add('escondido');
+    garagemElemento('garagem-manual-fallback').classList.add('escondido');
+    garagemElemento('garagem-manual-distancia-total').required = false;
+    garagemManualRotaFallback = false;
+    mostrarToast('Rota salva e odômetro atualizado.');
+  } catch (erro) {
+    console.error('Falha no cálculo da rota manual:', erro);
+    mostrarToast(erro.message || 'Não foi possível calcular a rota.', 'erro');
+  } finally {
+    botao.disabled = false;
+    botao.textContent = garagemManualRotaFallback ? 'Salvar distância manual' : 'Calcular rota e salvar';
+  }
+}
+
+function garagemIniciarInscricoes(uid) {
+  garagemUnsubs.forEach((unsubscribe) => unsubscribe());
+  garagemUnsubs = [];
+  const configRef = doc(db, GARAGEM_COLECOES.config, uid);
+  garagemUnsubs.push(onSnapshot(configRef, (snapshot) => {
+    if (!snapshot.exists()) {
+      setDoc(configRef, { userId: uid, odometro: 0, ciclos: { oleo: 0, pastilha: 0, relacao: 0 } }).catch((erro) => {
+        console.error('Falha ao inicializar configurações da garagem:', erro);
+        mostrarToast('Não foi possível inicializar a garagem.', 'erro');
+      });
+      return;
+    }
+    const dados = snapshot.data();
+    const monitores = Array.isArray(dados.monitores)
+      ? dados.monitores
+      : GARAGEM_MONITORES_PADRAO;
+    garagemConfig = { odometro: Number(dados.odometro || 0), ciclos: dados.ciclos || {}, monitores };
+    if (!Array.isArray(dados.monitores)) {
+      setDoc(configRef, { monitores, userId: uid }, { merge: true }).catch((erro) => {
+        console.error('Falha ao migrar monitores da garagem:', erro);
+        mostrarToast('Não foi possível carregar os monitores personalizados.', 'erro');
+      });
+    }
+    renderizarGaragem();
+  }, (erro) => { console.error('Falha ao sincronizar configurações da garagem:', erro); mostrarToast('Erro ao carregar o odômetro.', 'erro'); }));
+  garagemUnsubs.push(onSnapshot(query(collection(db, GARAGEM_COLECOES.registros), where('userId', '==', uid)), (snapshot) => {
+    garagemRegistros = snapshot.docs.map((registro) => ({ id: registro.id, ...registro.data() }));
+    renderizarGaragem();
+  }, (erro) => { console.error('Falha ao sincronizar logbook:', erro); mostrarToast('Erro ao carregar o logbook.', 'erro'); }));
+  garagemUnsubs.push(onSnapshot(query(collection(db, GARAGEM_COLECOES.viagens), where('userId', '==', uid)), (snapshot) => {
+    garagemViagens = snapshot.docs.map((registro) => ({ id: registro.id, ...registro.data() }));
+    renderizarGaragem();
+  }, (erro) => { console.error('Falha ao sincronizar viagens da garagem:', erro); mostrarToast('Erro ao carregar viagens.', 'erro'); }));
+  garagemUnsubs.push(onSnapshot(doc(db, GARAGEM_COLECOES.ativa, uid), (snapshot) => {
+    garagemViagemAtiva = snapshot.exists() ? snapshot.data() : null;
+    garagemRenderizarBannerAtivo();
+  }, (erro) => { console.error('Falha ao sincronizar viagem ativa:', erro); mostrarToast('Erro ao sincronizar viagem em andamento.', 'erro'); }));
+}
+
+function garagemLimparEdicao(formulario, campos, cancelId, tituloId, tituloPadrao) {
+  formulario.reset();
+  formulario.querySelector('[type="hidden"]').value = '';
+  garagemElemento(cancelId).classList.add('escondido');
+  garagemElemento(tituloId).textContent = tituloPadrao;
+  campos.forEach((id) => { if (garagemElemento(id).type === 'date') garagemElemento(id).value = garagemDataHoje(); });
+  if (formulario.id === 'garagem-combustivel-form') garagemAtualizarPreviewCombustivel();
+}
+
+garagemElemento('garagem-odo-form').addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const valor = Number(garagemElemento('garagem-odo-input').value);
+  if (!Number.isFinite(valor) || valor < 0) return mostrarToast('Informe um odômetro válido.', 'erro');
+  try { await garagemSalvarConfig({ odometro: valor }); mostrarToast('Odômetro atualizado.'); }
+  catch (erro) { console.error('Falha ao salvar odômetro:', erro); mostrarToast('Não foi possível salvar o odômetro.', 'erro'); }
+});
+
+garagemElemento('garagem-combustivel-data').value = garagemDataHoje();
+garagemElemento('garagem-manutencao-data').value = garagemDataHoje();
+garagemElemento('garagem-manual-data').value = garagemDataHoje();
+['garagem-combustivel-km', 'garagem-combustivel-litros', 'garagem-combustivel-valor'].forEach((id) => garagemElemento(id).addEventListener('input', garagemAtualizarPreviewCombustivel));
+garagemElemento('garagem-combustivel-form').addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const form = evento.currentTarget;
+  const id = garagemElemento('garagem-combustivel-id').value;
+  const dados = { tipo: 'combustivel', km: Number(garagemElemento('garagem-combustivel-km').value), litros: Number(garagemElemento('garagem-combustivel-litros').value), valor: Number(garagemElemento('garagem-combustivel-valor').value), data: garagemElemento('garagem-combustivel-data').value };
+  try {
+    await garagemSalvarRegistro(dados, id);
+    garagemLimparEdicao(form, ['garagem-combustivel-data'], 'garagem-combustivel-cancelar', 'garagem-combustivel-titulo', 'Registrar abastecimento');
+  } catch (erro) { console.error('Falha ao salvar abastecimento:', erro); mostrarToast('Não foi possível salvar o abastecimento.', 'erro'); }
+});
+garagemElemento('garagem-manutencao-form').addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const form = evento.currentTarget;
+  const id = garagemElemento('garagem-manutencao-id').value;
+  const monitorId = garagemElemento('garagem-manutencao-monitor-id').value;
+  const dados = { tipo: 'manutencao', nome: garagemElemento('garagem-manutencao-tipo').value.trim(), km: Number(garagemElemento('garagem-manutencao-km').value), valor: Number(garagemElemento('garagem-manutencao-valor').value), data: garagemElemento('garagem-manutencao-data').value, monitorId: monitorId || null };
+  try {
+    await garagemSalvarRegistro(dados, id);
+    garagemLimparEdicao(form, ['garagem-manutencao-data'], 'garagem-manutencao-cancelar', 'garagem-manutencao-titulo', 'Registrar manutenção');
+  } catch (erro) { console.error('Falha ao salvar manutenção:', erro); mostrarToast('Não foi possível salvar a manutenção.', 'erro'); }
+});
+garagemElemento('garagem-combustivel-cancelar').addEventListener('click', () => garagemLimparEdicao(garagemElemento('garagem-combustivel-form'), ['garagem-combustivel-data'], 'garagem-combustivel-cancelar', 'garagem-combustivel-titulo', 'Registrar abastecimento'));
+garagemElemento('garagem-manutencao-cancelar').addEventListener('click', () => garagemLimparEdicao(garagemElemento('garagem-manutencao-form'), ['garagem-manutencao-data'], 'garagem-manutencao-cancelar', 'garagem-manutencao-titulo', 'Registrar manutenção'));
+garagemElemento('garagem-monitores-lista').addEventListener('click', async (evento) => {
+  const botao = evento.target.closest('[data-garagem-troca]');
+  const editar = evento.target.closest('[data-garagem-monitor-editar]');
+  const excluir = evento.target.closest('[data-garagem-monitor-excluir]');
+  if (botao) {
+    const monitor = garagemConfig.monitores.find((item) => item.id === botao.dataset.garagemTroca);
+    if (!monitor) return;
+    garagemElemento('garagem-manutencao-tipo').value = monitor.nome;
+    garagemElemento('garagem-manutencao-monitor-id').value = monitor.id;
+    garagemElemento('garagem-manutencao-km').value = garagemConfig.odometro;
+    garagemElemento('garagem-manutencao-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  if (editar) {
+    const monitor = garagemConfig.monitores.find((item) => item.id === editar.dataset.garagemMonitorEditar);
+    if (!monitor) return;
+    garagemElemento('garagem-monitor-id').value = monitor.id;
+    garagemElemento('garagem-monitor-nome').value = monitor.nome;
+    garagemElemento('garagem-monitor-intervalo').value = monitor.intervalo;
+    garagemElemento('garagem-monitor-form-titulo').textContent = 'Editar monitor';
+    garagemElemento('garagem-monitor-cancelar').classList.remove('escondido');
+    garagemElemento('garagem-monitor-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  if (excluir && confirm('Excluir este monitor? Os registros antigos de manutenção serão mantidos.')) {
+    const monitores = garagemConfig.monitores.filter((item) => item.id !== excluir.dataset.garagemMonitorExcluir);
+    try {
+      await garagemSalvarConfig({ monitores });
+      mostrarToast('Monitor excluído.');
+    } catch (erro) {
+      console.error('Falha ao excluir monitor:', erro);
+      mostrarToast('Não foi possível excluir o monitor.', 'erro');
+    }
+  }
+});
+garagemElemento('garagem-monitor-form').addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const id = garagemElemento('garagem-monitor-id').value || `monitor-${Date.now()}`;
+  const nome = garagemElemento('garagem-monitor-nome').value.trim();
+  const intervalo = Number(garagemElemento('garagem-monitor-intervalo').value);
+  if (!nome || !Number.isFinite(intervalo) || intervalo <= 0) return mostrarToast('Informe o nome da peça e um limite válido em quilômetros.', 'erro');
+  const atual = garagemConfig.monitores.filter((monitor) => monitor.id !== id);
+  try {
+    await garagemSalvarConfig({ monitores: [...atual, { id, nome, intervalo }] });
+    evento.currentTarget.reset();
+    garagemElemento('garagem-monitor-id').value = '';
+    garagemElemento('garagem-monitor-form-titulo').textContent = 'Adicionar peça para monitorar';
+    garagemElemento('garagem-monitor-cancelar').classList.add('escondido');
+    mostrarToast('Monitor salvo.');
+  } catch (erro) {
+    console.error('Falha ao salvar monitor:', erro);
+    mostrarToast('Não foi possível salvar o monitor.', 'erro');
+  }
+});
+garagemElemento('garagem-monitor-cancelar').addEventListener('click', () => {
+  garagemElemento('garagem-monitor-form').reset();
+  garagemElemento('garagem-monitor-id').value = '';
+  garagemElemento('garagem-monitor-form-titulo').textContent = 'Adicionar peça para monitorar';
+  garagemElemento('garagem-monitor-cancelar').classList.add('escondido');
+});
+garagemElemento('garagem-logbook-lista').addEventListener('click', async (evento) => {
+  const editar = evento.target.closest('[data-garagem-editar]');
+  const excluir = evento.target.closest('[data-garagem-excluir]');
+  if (editar) {
+    const registro = garagemRegistros.find((item) => item.id === editar.dataset.garagemEditar);
+    if (!registro) return;
+    if (registro.tipo === 'combustivel') {
+      garagemElemento('garagem-combustivel-id').value = registro.id;
+      garagemElemento('garagem-combustivel-km').value = registro.km;
+      garagemElemento('garagem-combustivel-litros').value = registro.litros;
+      garagemElemento('garagem-combustivel-valor').value = registro.valor;
+      garagemElemento('garagem-combustivel-data').value = registro.data;
+      garagemElemento('garagem-combustivel-titulo').textContent = 'Editar abastecimento';
+      garagemElemento('garagem-combustivel-cancelar').classList.remove('escondido');
+      garagemAtualizarPreviewCombustivel();
+      garagemElemento('garagem-combustivel-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      garagemElemento('garagem-manutencao-id').value = registro.id;
+      garagemElemento('garagem-manutencao-tipo').value = registro.nome;
+      garagemElemento('garagem-manutencao-km').value = registro.km;
+      garagemElemento('garagem-manutencao-valor').value = registro.valor;
+      garagemElemento('garagem-manutencao-data').value = registro.data;
+      garagemElemento('garagem-manutencao-monitor-id').value = registro.monitorId || '';
+      garagemElemento('garagem-manutencao-titulo').textContent = 'Editar manutenção';
+      garagemElemento('garagem-manutencao-cancelar').classList.remove('escondido');
+      garagemElemento('garagem-manutencao-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+  if (excluir && confirm('Excluir este registro do logbook?')) {
+    try { await deleteDoc(doc(db, GARAGEM_COLECOES.registros, excluir.dataset.garagemExcluir)); mostrarToast('Registro excluído.'); }
+    catch (erro) { console.error('Falha ao excluir registro da garagem:', erro); mostrarToast('Não foi possível excluir o registro.', 'erro'); }
+  }
+});
+garagemElemento('garagem-logbook-prev').addEventListener('click', () => { garagemPaginaLogbook--; garagemRenderizarLogbook(); });
+garagemElemento('garagem-logbook-next').addEventListener('click', () => { garagemPaginaLogbook++; garagemRenderizarLogbook(); });
+['garagem-filtro-mes', 'garagem-filtro-ano'].forEach((id) => garagemElemento(id).addEventListener('change', renderizarGaragem));
+garagemElemento('garagem-trips-prev').addEventListener('click', () => { garagemPaginaViagens--; garagemRenderizarViagens(); });
+garagemElemento('garagem-trips-next').addEventListener('click', () => { garagemPaginaViagens++; garagemRenderizarViagens(); });
+garagemElemento('garagem-viagens-lista').addEventListener('click', async (evento) => {
+  const editar = evento.target.closest('[data-garagem-trip-edit]');
+  const excluir = evento.target.closest('[data-garagem-trip-delete]');
+  if (editar) {
+    const viagem = garagemViagens.find((item) => item.id === editar.dataset.garagemTripEdit);
+    if (!viagem) return;
+    const nome = prompt('Nome da viagem:', viagem.nome || `${viagem.origem || ''} → ${viagem.destino || ''}`);
+    if (nome === null) return;
+    const distanciaInformada = prompt('Distância total da viagem em km:', String(viagem.distanciaKm || 0));
+    if (distanciaInformada === null) return;
+    const novaDistancia = Number(distanciaInformada);
+    if (!Number.isFinite(novaDistancia) || novaDistancia < 0) return mostrarToast('Informe uma distância válida.', 'erro');
+    let voltaAtualizada = viagem.volta;
+    if (viagem.volta) {
+      const voltaInformada = prompt('Distância da volta em km:', String(viagem.volta.distanciaKm || 0));
+      if (voltaInformada === null) return;
+      const distanciaVolta = Number(voltaInformada);
+      if (!Number.isFinite(distanciaVolta) || distanciaVolta < 0 || distanciaVolta > novaDistancia) return mostrarToast('Informe uma distância de volta válida.', 'erro');
+      voltaAtualizada = { ...viagem.volta, distanciaKm: distanciaVolta };
+    }
+    try {
+      const velocidadeMedia = Number(viagem.duracaoSegundos) > 0 ? novaDistancia / (Number(viagem.duracaoSegundos) / 3600) : Number(viagem.velocidadeMedia || 0);
+      await garagemSalvarViagemSincronizada({ ...viagem, nome: nome.trim() || 'Viagem de moto', distanciaKm: novaDistancia, velocidadeMedia, ...(voltaAtualizada ? { volta: voltaAtualizada } : {}) }, viagem.id);
+      mostrarToast('Viagem atualizada.');
+    }
+    catch (erro) { console.error('Falha ao editar viagem:', erro); mostrarToast('Não foi possível editar a viagem.', 'erro'); }
+  }
+  if (excluir && confirm('Excluir esta viagem? O odômetro também será ajustado.')) {
+    const viagem = garagemViagens.find((item) => item.id === excluir.dataset.garagemTripDelete);
+    if (!viagem) return;
+    try {
+      await garagemExcluirViagemSincronizada(viagem.id);
+      mostrarToast('Viagem excluída e odômetro ajustado.');
+    } catch (erro) { console.error('Falha ao excluir viagem:', erro); mostrarToast('Não foi possível excluir a viagem.', 'erro'); }
+  }
+});
+garagemElemento('garagem-manual-volta').addEventListener('change', (evento) => {
+  const incluirVolta = evento.target.checked;
+  garagemElemento('garagem-manual-volta-campos').classList.toggle('escondido', !incluirVolta);
+});
+garagemElemento('garagem-manual-form').addEventListener('submit', garagemSalvarRotaManual);
+garagemElemento('garagem-live-form').addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  if (!navigator.geolocation) return mostrarToast('Este navegador não oferece geolocalização.', 'erro');
+  if (!usuarioAtual || garagemViagemAtiva) return mostrarToast('Já existe uma viagem em andamento.', 'erro');
+  const instante = Date.now();
+  garagemViagemAtiva = {
+    userId: usuarioAtual.uid, status: 'running', nome: garagemElemento('garagem-live-origem').value.trim() || 'Viagem de moto',
+    startedAt: new Date(instante).toISOString(), resumedAt: instante, elapsedMs: 0, velocidadeMaxima: 0, aguardandoVolta: false,
+    segmentos: [{ tipo: 'ida', iniciadoEm: instante, distanciaKm: 0, velocidadeMaxima: 0, pontos: [] }]
+  };
+  try {
+    await garagemPersistirViagemAtiva();
+    garagemRenderizarBannerAtivo();
+    mostrarToast('Rastreamento iniciado. Mantenha esta tela aberta para registrar o GPS.');
+  } catch (erro) {
+    garagemViagemAtiva = null;
+    console.error('Falha ao iniciar viagem:', erro);
+    mostrarToast('Não foi possível iniciar o rastreamento.', 'erro');
+  }
+});
+garagemElemento('garagem-trip-pause').addEventListener('click', () => garagemPausarRetomar().catch((erro) => { console.error('Falha ao pausar/retomar viagem:', erro); mostrarToast('Não foi possível atualizar o estado da viagem.', 'erro'); }));
+garagemElemento('garagem-trip-return').addEventListener('click', () => garagemRegistrarVolta().catch((erro) => { console.error('Falha ao iniciar a volta:', erro); mostrarToast('Não foi possível registrar a volta.', 'erro'); }));
+garagemElemento('garagem-trip-finish').addEventListener('click', () => {
+  if (confirm('Finalizar a viagem e atualizar o odômetro?')) garagemFinalizarViagem();
+});
+document.querySelectorAll('[data-garagem-tab]').forEach((tab) => tab.addEventListener('click', () => {
+  document.querySelectorAll('[data-garagem-tab]').forEach((item) => {
+    const ativo = item === tab;
+    item.classList.toggle('active', ativo);
+    item.setAttribute('aria-selected', String(ativo));
+  });
+  document.querySelectorAll('.garagem-panel').forEach((panel) => panel.classList.toggle('escondido', panel.id !== tab.dataset.garagemTab));
+  if (tab.dataset.garagemTab === 'garagem-viagens') garagemRenderizarViagens();
+}));
+
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    garagemUnsubs.forEach((unsubscribe) => unsubscribe());
+    garagemUnsubs = [];
+    garagemPararRastreamento();
+    garagemConfig = { odometro: 0, ciclos: { oleo: 0, pastilha: 0, relacao: 0 } };
+    garagemRegistros = [];
+    garagemViagens = [];
+    garagemViagemAtiva = null;
+    garagemRenderizarBannerAtivo();
+    return;
+  }
+  garagemIniciarInscricoes(user.uid);
+});

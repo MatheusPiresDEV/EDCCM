@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="style.css">
     <!-- Chart.js para os gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <!-- FontAwesome / Ícones Web (Opcional, usando emojis nativos e SVGs limpos) -->
 </head>
 
@@ -24,6 +25,15 @@
     
     <!-- Mensagem de Feedback (Toast) -->
     <div id="toast" class="toast escondido"></div>
+    <aside id="garagem-trip-banner" class="garagem-trip-banner escondido" aria-live="polite">
+        <div class="garagem-trip-status"><strong>Viagem em andamento</strong><span id="garagem-trip-status">Rastreando</span></div>
+        <strong id="garagem-trip-timer">00:00:00</strong>
+        <div class="garagem-trip-actions">
+            <button type="button" class="btn-secundario btn-sm" id="garagem-trip-pause">Pausar / Parada</button>
+            <button type="button" class="btn-secundario btn-sm" id="garagem-trip-return">Registrar Volta</button>
+            <button type="button" class="btn-perigo btn-sm" id="garagem-trip-finish">Finalizar</button>
+        </div>
+    </aside>
 
     <!-- TELA DE BLOQUEIO (LOCKSCREEN ESTILO WINDOWS) -->
     <div id="lockscreen">
@@ -101,6 +111,9 @@
             </button>
             <button class="nav-btn btn-destaque" data-target="sec-novo-album">
                 <span class="nav-text">Novo Álbum</span>
+            </button>
+            <button class="nav-btn" data-target="sec-garagem">
+                <span class="nav-text">Garagem</span>
             </button>
             <button class="nav-btn" data-target="sec-top5">
                 <span class="nav-text">Top 5</span>
@@ -325,6 +338,66 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </section>
+
+        <section id="sec-garagem" class="tela escondido">
+            <div class="secao-cabecalho">
+                <div><h2>Garagem</h2><p class="secao-subtitulo">Manutenção, combustível e suas viagens de moto.</p></div>
+            </div>
+            <div class="garagem-tabs" role="tablist" aria-label="Seções da garagem">
+                <button type="button" class="garagem-tab active" role="tab" aria-selected="true" data-garagem-tab="garagem-manutencao">Manutenções &amp; Combustível</button>
+                <button type="button" class="garagem-tab" role="tab" aria-selected="false" data-garagem-tab="garagem-viagens">Viagens &amp; Rolês</button>
+            </div>
+
+            <div id="garagem-manutencao" class="garagem-panel">
+                <div class="garagem-stats">
+                    <article class="garagem-stat"><span>Odômetro geral</span><strong id="garagem-odo-valor">— km</strong><form id="garagem-odo-form"><label class="sr-only" for="garagem-odo-input">Odômetro atual</label><input id="garagem-odo-input" type="number" min="0" step="0.1" placeholder="Atualizar km" required><button class="btn-secundario btn-sm" type="submit">Salvar</button></form></article>
+                    <article class="garagem-stat"><span>Próxima troca de óleo</span><strong id="garagem-oleo-restante">— km</strong><small>restantes</small></article>
+                    <article class="garagem-stat"><span>Média geral</span><strong id="garagem-media-consumo">— km/L</strong></article>
+                    <article class="garagem-stat"><span>Total rodado</span><strong id="garagem-total-rodado">— km</strong><div class="garagem-stat-filters"><label class="sr-only" for="garagem-filtro-mes">Mês</label><select id="garagem-filtro-mes"><option value="">Todos os meses</option></select><label class="sr-only" for="garagem-filtro-ano">Ano</label><select id="garagem-filtro-ano"><option value="">Todos os anos</option></select></div></article>
+                    <article class="garagem-stat"><span>Gastos totais</span><strong id="garagem-total-gasto">R$ 0,00</strong><small>peças + combustível</small></article>
+                </div>
+                <div class="card-formulario garagem-monitores">
+                    <h3>Monitores de desgaste</h3>
+                    <div id="garagem-monitores-lista" class="garagem-monitor-grid"></div>
+                    <form id="garagem-monitor-form" class="garagem-monitor-form">
+                        <h4 id="garagem-monitor-form-titulo">Adicionar peça para monitorar</h4>
+                        <input type="hidden" id="garagem-monitor-id">
+                        <div class="grupo-campo"><label for="garagem-monitor-nome">Peça / componente</label><input id="garagem-monitor-nome" type="text" placeholder="Ex.: Pneus" required></div>
+                        <div class="grupo-campo"><label for="garagem-monitor-intervalo">Intervalo recomendado (km)</label><input id="garagem-monitor-intervalo" type="number" min="1" step="1" placeholder="Ex.: 10000" required></div>
+                        <div class="form-acoes"><button type="submit" class="btn-sucesso">Salvar monitor</button><button type="button" class="btn-secundario escondido" id="garagem-monitor-cancelar">Cancelar edição</button></div>
+                    </form>
+                </div>
+                <div class="garagem-forms">
+                    <form id="garagem-combustivel-form" class="card-formulario">
+                        <h3 id="garagem-combustivel-titulo">Registrar abastecimento</h3><input type="hidden" id="garagem-combustivel-id">
+                        <div class="grupo-campo"><label for="garagem-combustivel-km">KM atual</label><input id="garagem-combustivel-km" type="number" min="0" step="0.1" required></div>
+                        <div class="grid-form-2col"><div class="grupo-campo"><label for="garagem-combustivel-litros">Litros</label><input id="garagem-combustivel-litros" type="number" min="0.01" step="0.01" required></div><div class="grupo-campo"><label for="garagem-combustivel-valor">Valor pago (R$)</label><input id="garagem-combustivel-valor" type="number" min="0" step="0.01" required></div></div>
+                        <div class="grupo-campo"><label for="garagem-combustivel-data">Data</label><input id="garagem-combustivel-data" type="date" required></div>
+                        <p id="garagem-combustivel-calculo" class="garagem-hint" aria-live="polite">A média será calculada a partir do próximo abastecimento.</p>
+                        <div class="form-acoes"><button type="submit" class="btn-sucesso">Salvar abastecimento</button><button type="button" class="btn-secundario escondido" id="garagem-combustivel-cancelar">Cancelar edição</button></div>
+                    </form>
+                    <form id="garagem-manutencao-form" class="card-formulario">
+                        <h3 id="garagem-manutencao-titulo">Registrar manutenção</h3><input type="hidden" id="garagem-manutencao-id"><input type="hidden" id="garagem-manutencao-monitor-id">
+                        <div class="grupo-campo"><label for="garagem-manutencao-tipo">Peça / serviço</label><input id="garagem-manutencao-tipo" list="garagem-monitor-opcoes" placeholder="Ex.: Pastilha de freio" required><datalist id="garagem-monitor-opcoes"></datalist></div>
+                        <div class="grid-form-2col"><div class="grupo-campo"><label for="garagem-manutencao-km">Odômetro (km)</label><input id="garagem-manutencao-km" type="number" min="0" step="0.1" required></div><div class="grupo-campo"><label for="garagem-manutencao-valor">Valor (R$)</label><input id="garagem-manutencao-valor" type="number" min="0" step="0.01" required></div></div>
+                        <div class="grupo-campo"><label for="garagem-manutencao-data">Data</label><input id="garagem-manutencao-data" type="date" required></div>
+                        <div class="form-acoes"><button type="submit" class="btn-sucesso">Salvar manutenção</button><button type="button" class="btn-secundario escondido" id="garagem-manutencao-cancelar">Cancelar edição</button></div>
+                    </form>
+                </div>
+                <div class="card-formulario garagem-logbook"><div class="garagem-logbook-head"><h3>Logbook</h3><span>Abastecimentos e manutenções</span></div><div id="garagem-logbook-lista"></div><div class="garagem-pagination"><button id="garagem-logbook-prev" type="button" class="btn-secundario btn-sm">Anterior</button><span id="garagem-logbook-page">Página 1 de 1</span><button id="garagem-logbook-next" type="button" class="btn-secundario btn-sm">Próxima</button></div></div>
+            </div>
+
+            <div id="garagem-viagens" class="garagem-panel escondido">
+                <div class="garagem-stats garagem-trip-stats">
+                    <article class="garagem-stat"><span>Total de viagens</span><strong id="garagem-trip-count">0</strong></article><article class="garagem-stat"><span>KM em viagens</span><strong id="garagem-trip-distance">0 km</strong></article><article class="garagem-stat"><span>Velocidade máxima</span><strong id="garagem-trip-speed">0 km/h</strong></article><article class="garagem-stat"><span>Tempo na estrada</span><strong id="garagem-trip-duration">0d 00:00:00</strong></article>
+                </div>
+                <div class="garagem-forms">
+                    <form id="garagem-live-form" class="card-formulario"><h3>Rastreamento ao vivo</h3><p class="secao-subtitulo">Use o GPS do aparelho. Mantenha a permissão de localização ativa durante o trajeto.</p><div class="grupo-campo"><label for="garagem-live-origem">Identificação / origem</label><input id="garagem-live-origem" type="text" placeholder="Ex.: Rolê de sábado"></div><button type="submit" class="btn-primario">Iniciar viagem com GPS</button><p id="garagem-gps-status" class="garagem-hint" aria-live="polite"></p></form>
+                    <form id="garagem-manual-form" class="card-formulario"><h3>Cadastro manual por endereço</h3><div class="grupo-campo"><label for="garagem-manual-origem">Origem</label><input id="garagem-manual-origem" required><small class="garagem-hint">Dica: Digite no formato 'Nome da Rua, Cidade, Estado' (Ex: Rua Pasteur, Colombo, PR).</small></div><div class="grupo-campo"><label for="garagem-manual-paradas">Paradas (uma por linha, opcional)</label><textarea id="garagem-manual-paradas" rows="2"></textarea></div><div class="grupo-campo"><label for="garagem-manual-destino">Destino</label><input id="garagem-manual-destino" required><small class="garagem-hint">Dica: Digite no formato 'Nome da Rua, Cidade, Estado' (Ex: Rua Pasteur, Colombo, PR).</small></div><label class="garagem-checkbox"><input type="checkbox" id="garagem-manual-volta"> Incluir volta</label><div id="garagem-manual-volta-campos" class="escondido"><label class="garagem-checkbox"><input type="checkbox" id="garagem-manual-volta-diferente"> Houve parada diferente na volta?</label><div class="grupo-campo"><label for="garagem-manual-paradas-volta">Paradas da volta (uma por linha)</label><textarea id="garagem-manual-paradas-volta" rows="2"></textarea></div></div><div class="grupo-campo"><label for="garagem-manual-data">Data</label><input id="garagem-manual-data" type="date" required></div><div id="garagem-manual-fallback" class="garagem-route-fallback escondido" role="alert"><strong>Não encontramos a rota automática. Digite a distância total em KM manualmente para salvar.</strong><div class="grupo-campo"><label for="garagem-manual-distancia-total">Distância total da viagem (km)</label><input id="garagem-manual-distancia-total" type="number" min="0.1" step="0.1"></div></div><button type="submit" class="btn-sucesso" id="garagem-manual-submit">Calcular rota e salvar</button></form>
+                </div>
+                <div id="garagem-viagens-lista" class="garagem-saved-trips"></div><div class="garagem-pagination"><button id="garagem-trips-prev" type="button" class="btn-secundario btn-sm">Anterior</button><span id="garagem-trips-page">Página 1 de 1</span><button id="garagem-trips-next" type="button" class="btn-secundario btn-sm">Próxima</button></div>
             </div>
         </section>
 
@@ -1152,6 +1225,7 @@
     </div>
 
     <!-- Script Principal -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script type="module" src="app.js"></script>
 </body>
 
