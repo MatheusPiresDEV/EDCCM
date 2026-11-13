@@ -82,6 +82,8 @@ exports.gerenciarUsuarioAdmin = onCall(async (request) => {
           uid: createdUser.uid,
           email: createdUser.email || email,
           role,
+          createdAt: now,
+          updatedAt: now,
           criadoEm: now,
           atualizadoEm: now,
           ultimoLogin: now
@@ -126,6 +128,7 @@ exports.gerenciarUsuarioAdmin = onCall(async (request) => {
         uid,
         email: emailFinal,
         role: protectedAdmin ? 'admin' : role,
+        updatedAt: FieldValue.serverTimestamp(),
         atualizadoEm: FieldValue.serverTimestamp()
       });
 
@@ -171,6 +174,21 @@ exports.gerenciarUsuarioAdmin = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'Operação de administração inválida.');
   } catch (error) {
     if (error instanceof HttpsError) throw error;
+    if (error?.code === 'auth/email-already-exists' || error?.code === 'auth/uid-already-exists') {
+      throw new HttpsError('already-exists', 'Este e-mail já está cadastrado.');
+    }
+    if (error?.code === 'auth/invalid-email') {
+      throw new HttpsError('invalid-argument', 'Informe um endereço de e-mail válido.');
+    }
+    if (error?.code === 'auth/weak-password' || error?.code === 'auth/invalid-password') {
+      throw new HttpsError('invalid-argument', 'A senha deve ter no mínimo 6 caracteres.');
+    }
+    if (error?.code === 'auth/too-many-requests') {
+      throw new HttpsError('resource-exhausted', 'Muitas tentativas. Aguarde um momento e tente novamente.');
+    }
+    if (error?.code === 'auth/operation-not-allowed') {
+      throw new HttpsError('failed-precondition', 'A criação de contas por e-mail está desativada no Firebase.');
+    }
     console.error('Erro na operação de gerenciamento de usuário:', error);
     throw new HttpsError('internal', 'Não foi possível concluir a operação da conta.');
   }

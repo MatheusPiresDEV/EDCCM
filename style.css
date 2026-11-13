@@ -796,6 +796,10 @@ header {
   gap: 10px;
 }
 
+.faixas-add-bottom {
+  align-self: flex-start;
+}
+
 .linha-faixa {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto;
@@ -3812,7 +3816,7 @@ iframe {
 #sec-estatisticas .grid-graficos,
 #sec-estatisticas .grid-estatisticas-visuais {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   width: 100%;
   gap: 26px;
   margin-top: 26px;
@@ -3851,6 +3855,10 @@ iframe {
 #sec-estatisticas .cards-stats {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+
+#sec-estatisticas .ranking-albuns-secao {
+  grid-column: 1 / -1;
 }
 
 .garagem-monitor-form {
@@ -3944,6 +3952,8 @@ body.garagem-trip-running #main-header { top: 66px; }
 .garagem-stat > span { display: block; color: var(--muted); font-size: .84rem; }
 .garagem-stat > strong { display: block; margin: 8px 0 4px; font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.1rem, 3vw, 1.5rem); overflow-wrap: anywhere; }
 .garagem-stat small { color: var(--muted); }
+.garagem-stat > strong.garagem-alerta-texto { color: #ef4444; }
+.garagem-stat small.garagem-alerta { display: inline-block; padding: 3px 8px; border-radius: 999px; background: rgba(239, 68, 68, .14); color: #ef4444; font-weight: 800; }
 .garagem-stat form { display: flex; gap: 6px; margin-top: 8px; }
 .garagem-stat input { min-width: 0; width: 100%; padding: 8px; }
 .garagem-stat-filters { flex-wrap: wrap; margin-top: 8px; }
@@ -3956,6 +3966,7 @@ body.garagem-trip-running #main-header { top: 66px; }
 .garagem-monitor { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card-alt); }
 .garagem-monitor-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-weight: 700; }
 .garagem-monitor-head span:last-child { color: var(--muted); font-size: .8rem; font-weight: 500; text-align: right; }
+.garagem-monitor-alerta { display: inline-block; padding: 3px 7px; border-radius: 999px; background: rgba(239, 68, 68, .14); color: #ef4444 !important; font-weight: 800 !important; }
 .garagem-progress { height: 9px; overflow: hidden; border-radius: 99px; background: rgba(255,255,255,.09); }
 .garagem-progress i { display: block; height: 100%; border-radius: inherit; background: #22c55e; transition: width .25s ease; }
 .garagem-progress i.warn { background: #eab308; }.garagem-progress i.danger { background: #ef4444; }
@@ -4046,8 +4057,20 @@ body.garagem-trip-running #main-header { top: 66px; }
   body.garagem-trip-running #main-header .nav-menu.active { top: calc(100% + 8px); }
 }
 
-@media (max-width: 680px) {
-  #sec-estatisticas .cards-stats {
+@media (max-width: 760px) {
+  #sec-estatisticas .cards-stats,
+  #sec-estatisticas .grid-graficos,
+  #sec-estatisticas .grid-estatisticas-visuais {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  #sec-estatisticas .ranking-albuns-secao {
+    grid-column: auto;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 900px) {
+  #sec-estatisticas .cards-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

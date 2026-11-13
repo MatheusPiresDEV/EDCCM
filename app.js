@@ -1,6 +1,6 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import {
-  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut
+  getAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
   getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, getDoc, setDoc, serverTimestamp, arrayUnion, onSnapshot, runTransaction
@@ -802,6 +802,7 @@ let graficoEvolucaoBandas = null;
 let graficoNotaAno = null;
 let graficoTendenciaTemporal = null;
 let graficoPosicaoFaixas = null;
+let graficoDecadas = null;
 let buscaMetadadosItunesController = null;
 let consultaDuracaoItunesController = null;
 let buscaMetadadosItunesTimer = null;
@@ -867,20 +868,16 @@ async function garantirPerfilUsuario(user) {
   const perfilSnap = await getDoc(perfilRef);
 
   if (!perfilSnap.exists()) {
-    const perfilBase = {
-      uid: user.uid,
-      email: user.email || '',
-      role: ADMIN_EMAILS.includes(normalizarEmail(user.email)) ? 'admin' : 'user',
-      criadoEm: serverTimestamp(),
-      atualizadoEm: serverTimestamp(),
-      ultimoLogin: serverTimestamp()
-    };
-    await setDoc(perfilRef, perfilBase);
-    perfilUsuarioAtual = { id: user.uid, ...perfilBase };
-    return perfilUsuarioAtual;
+    perfilUsuarioAtual = null;
+    return null;
   }
 
   const perfilExistente = { id: perfilSnap.id, ...perfilSnap.data() };
+  if (!normalizarEmail(perfilExistente.email) ||
+    normalizarEmail(perfilExistente.email) !== normalizarEmail(user.email || '')) {
+    perfilUsuarioAtual = null;
+    return null;
+  }
   const deveSerAdmin = usuarioEhAdmin(user, perfilExistente);
 
   if (deveSerAdmin && String(perfilExistente.role || '').toLowerCase() !== 'admin') {
@@ -892,14 +889,6 @@ async function garantirPerfilUsuario(user) {
   }
 
   perfilUsuarioAtual = { ...perfilExistente, role: deveSerAdmin ? 'admin' : (perfilExistente.role || 'user') };
-  if (normalizarEmail(perfilUsuarioAtual.email) !== normalizarEmail(user.email || '')) {
-    await updateDoc(perfilRef, {
-      email: user.email || perfilUsuarioAtual.email || '',
-      atualizadoEm: serverTimestamp()
-    });
-    perfilUsuarioAtual.email = user.email || perfilUsuarioAtual.email || '';
-  }
-
   return perfilUsuarioAtual;
 }
 
@@ -1077,8 +1066,8 @@ async function carregarUsuariosAdmin() {
       const ehAdminPrincipal = normalizarEmail(usuario.email) === EMAIL_ADMIN_PRINCIPAL;
       const valoresCelulas = [
         usuario.email || 'Sem e-mail',
-        formatarDataHora(usuario.criadoEm),
-        formatarDataHora(usuario.atualizadoEm || usuario.criadoEm)
+        formatarDataHora(usuario.createdAt || usuario.criadoEm),
+        formatarDataHora(usuario.updatedAt || usuario.atualizadoEm || usuario.createdAt || usuario.criadoEm)
       ];
 
       const celulaEmail = document.createElement('td');
@@ -1144,6 +1133,64 @@ function aplicarAcessoAdmin() {
   });
 }
 
+function mensagemErroUsuarioAdmin(error) {
+  switch (error?.code) {
+    case 'functions/already-exists':
+    case 'auth/email-already-in-use':
+    case 'auth/email-already-exists':
+      return 'Este e-mail já está cadastrado.';
+    case 'functions/invalid-argument':
+    case 'auth/invalid-email':
+    case 'auth/weak-password':
+      return error.message || 'Informe um e-mail válido e uma senha com pelo menos 6 caracteres.';
+    case 'permission-denied':
+      return 'Sua conta não tem permissão para alterar os usuários.';
+    case 'unavailable':
+    case 'network-request-failed':
+      return 'Falha de conexão. Verifique a internet e tente novamente.';
+    case 'functions/permission-denied':
+      return 'Acesso de administrador obrigatório.';
+    case 'functions/unauthenticated':
+      return 'Sua sessão expirou. Entre novamente para continuar.';
+    case 'functions/failed-precondition':
+      return error.message || 'Esta alteração não pode ser aplicada à conta protegida.';
+    case 'functions/not-found':
+      return 'Usuário não encontrado.';
+    case 'functions/internal':
+    case 'functions/unavailable':
+      return 'Não foi possível concluir a operação agora. Tente novamente.';
+    case 'functions/resource-exhausted':
+    case 'auth/too-many-requests':
+      return 'Muitas tentativas. Aguarde um momento e tente novamente.';
+    case 'auth/operation-not-allowed':
+      return 'A criação de contas por e-mail está desativada no Firebase.';
+    case 'auth/internal-error':
+      return 'O Firebase não conseguiu concluir a criação da conta. Tente novamente.';
+    default:
+      return error?.message || 'Não foi possível concluir a operação do usuário.';
+  }
+}
+
+function limparFormularioUsuarioAdmin() {
+  const form = document.getElementById('form-admin-usuario');
+  const inputId = document.getElementById('admin-user-id');
+  const inputEmail = document.getElementById('admin-user-email');
+  const inputSenha = document.getElementById('admin-user-senha');
+  const inputRole = document.getElementById('admin-user-role');
+  if (form) form.reset();
+  if (inputId) inputId.value = '';
+  if (inputEmail) inputEmail.readOnly = false;
+  if (inputRole) inputRole.disabled = false;
+  if (inputSenha) {
+    inputSenha.required = false;
+    inputSenha.placeholder = 'Obrigatória para nova conta; deixe vazia ao editar';
+  }
+  const titulo = document.getElementById('admin-user-form-title');
+  if (titulo) titulo.textContent = 'Cadastrar usuário';
+  const botaoSalvar = form?.querySelector('button[type="submit"]');
+  if (botaoSalvar) botaoSalvar.textContent = 'Salvar usuário';
+}
+
 async function editarUsuarioAdmin(idUsuario) {
   if (!usuarioEhAdmin(usuarioAtual, perfilUsuarioAtual)) {
     mostrarToast('Acesso de administrador obrigatório.', 'erro');
@@ -1173,6 +1220,10 @@ async function editarUsuarioAdmin(idUsuario) {
       inputRole.value = ehAdminPrincipal ? 'admin' : (String(usuario.role || 'user').toLowerCase() === 'admin' ? 'admin' : 'user');
       inputRole.disabled = ehAdminPrincipal;
     }
+    const titulo = document.getElementById('admin-user-form-title');
+    if (titulo) titulo.textContent = 'Editar usuário';
+    const botaoSalvar = document.querySelector('#form-admin-usuario button[type="submit"]');
+    if (botaoSalvar) botaoSalvar.textContent = 'Atualizar usuário';
 
     window.navegarPara('sec-admin');
   } catch (error) {
@@ -1214,7 +1265,7 @@ async function excluirUsuarioAdmin(idUsuario) {
     await carregarEstatisticasAdmin();
   } catch (error) {
     console.error('Erro ao excluir usuário admin:', error);
-    mostrarToast(error.message || 'Não foi possível excluir este usuário.', 'erro');
+    mostrarToast(mensagemErroUsuarioAdmin(error), 'erro');
   }
 }
 
@@ -1238,14 +1289,19 @@ async function salvarUsuarioAdmin(event) {
   const role = inputRole.value;
 
   const idUsuario = inputId ? inputId.value : '';
+  const formulario = document.getElementById('form-admin-usuario');
+  const botaoSalvar = formulario?.querySelector('button[type="submit"]');
   if (!['user', 'admin'].includes(role)) {
     mostrarToast('Selecione um nível de acesso válido.', 'erro');
     return;
   }
-  if (inputSenha) inputSenha.placeholder = idUsuario ? 'Vazia mantém a senha atual' : 'Obrigatória para nova conta';
 
-  if (!email || (!idUsuario && !senha)) {
-    mostrarToast('Informe e-mail e senha para criar uma conta.', 'erro');
+  if (!email || !inputEmail.validity.valid) {
+    mostrarToast('Informe um endereço de e-mail válido.', 'erro');
+    return;
+  }
+  if (!idUsuario && !senha) {
+    mostrarToast('Informe uma senha para criar a conta.', 'erro');
     return;
   }
 
@@ -1255,9 +1311,12 @@ async function salvarUsuarioAdmin(event) {
   }
 
   try {
-    const acao = idUsuario ? 'update' : 'create';
+    if (botaoSalvar) {
+      botaoSalvar.disabled = true;
+      botaoSalvar.textContent = idUsuario ? 'Atualizando…' : 'Criando…';
+    }
     await httpsCallable(firebaseFunctions, 'gerenciarUsuarioAdmin')({
-      action: acao,
+      action: idUsuario ? 'update' : 'create',
       uid: idUsuario || undefined,
       email,
       password: senha || undefined,
@@ -1271,18 +1330,18 @@ async function salvarUsuarioAdmin(event) {
       aplicarAcessoAdmin();
     }
 
-    const formAdmin = document.getElementById('form-admin-usuario');
-    formAdmin?.reset();
-    if (inputId) inputId.value = '';
-    if (inputEmail) inputEmail.readOnly = false;
-    if (inputRole) inputRole.disabled = false;
-    if (inputSenha) inputSenha.placeholder = 'Obrigatória para nova conta';
+    limparFormularioUsuarioAdmin();
     mostrarToast(idUsuario ? 'Usuário atualizado com sucesso.' : 'Usuário criado com sucesso.');
     await carregarUsuariosAdmin();
     await carregarEstatisticasAdmin();
   } catch (error) {
     console.error('Erro ao salvar usuário admin:', error);
-    mostrarToast(error.message || 'Não foi possível salvar as alterações da conta.', 'erro');
+    mostrarToast(mensagemErroUsuarioAdmin(error), 'erro');
+  } finally {
+    if (botaoSalvar) {
+      botaoSalvar.disabled = false;
+      botaoSalvar.textContent = inputId?.value ? 'Atualizar usuário' : 'Salvar usuário';
+    }
   }
 }
 
@@ -1752,24 +1811,109 @@ document.getElementById('resultados-metadados-itunes').addEventListener('click',
 });
 
 // AUTENTICAÇÃO
-document.getElementById('btn-register').addEventListener('click', () => {
+async function criarContaComPerfilSecundario(email, senha) {
+  let secondaryApp = null;
+  let secondaryAuth = null;
+  let usuarioCriado = null;
+  try {
+    secondaryApp = initializeApp(
+      firebaseConfig,
+      `cadastro-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    );
+    secondaryAuth = getAuth(secondaryApp);
+    const secondaryDb = getFirestore(secondaryApp);
+    const credencial = await createUserWithEmailAndPassword(secondaryAuth, email, senha);
+    usuarioCriado = credencial.user;
+    const agora = serverTimestamp();
+    await setDoc(doc(secondaryDb, PERFIL_USERS_COLLECTION, usuarioCriado.uid), {
+      uid: usuarioCriado.uid,
+      email: usuarioCriado.email || email,
+      role: 'user',
+      createdAt: agora,
+      updatedAt: agora,
+      criadoEm: agora,
+      atualizadoEm: agora,
+      ultimoLogin: agora
+    });
+  } catch (error) {
+    if (usuarioCriado) {
+      try {
+        await deleteUser(usuarioCriado);
+      } catch (rollbackError) {
+        console.error('Não foi possível remover a conta após falha ao criar o perfil:', rollbackError);
+      }
+    }
+    throw error;
+  } finally {
+    if (secondaryAuth?.currentUser) {
+      try {
+        await signOut(secondaryAuth);
+      } catch (error) {
+        console.error('Não foi possível encerrar a sessão temporária de cadastro:', error);
+      }
+    }
+    if (secondaryApp) {
+      try {
+        await deleteApp(secondaryApp);
+      } catch (error) {
+        console.error('Não foi possível remover a instância temporária de cadastro:', error);
+      }
+    }
+  }
+}
+
+function mensagemErroAutenticacao(error, cadastro = false) {
+  switch (error?.code) {
+    case 'auth/email-already-in-use':
+    case 'auth/email-already-exists':
+      return 'E-mail já cadastrado.';
+    case 'auth/invalid-email':
+      return 'Informe um endereço de e-mail válido.';
+    case 'auth/weak-password':
+      return 'A senha deve ter no mínimo 6 caracteres.';
+    case 'auth/invalid-credential':
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+      return 'E-mail ou senha incorretos.';
+    case 'auth/too-many-requests':
+      return 'Muitas tentativas. Aguarde um momento e tente novamente.';
+    case 'auth/network-request-failed':
+      return 'Falha de conexão. Verifique a internet e tente novamente.';
+    default:
+      return cadastro
+        ? 'Não foi possível criar a conta. Verifique os dados e tente novamente.'
+        : 'Não foi possível entrar. Verifique os dados e tente novamente.';
+  }
+}
+
+document.getElementById('btn-register').addEventListener('click', async (evento) => {
   const email = document.getElementById('auth-email').value.trim();
   const pass = document.getElementById('auth-pass').value;
   if (!email || !pass) return mostrarToast("Preencha e-mail e senha!", "erro");
-
-  createUserWithEmailAndPassword(auth, email, pass)
-    .then(() => mostrarToast("Conta criada com sucesso!"))
-    .catch(err => mostrarToast("Erro no cadastro: " + err.message, "erro"));
+  const botao = evento.currentTarget;
+  botao.disabled = true;
+  try {
+    await criarContaComPerfilSecundario(email, pass);
+    await signInWithEmailAndPassword(auth, email, pass);
+    mostrarToast('Conta criada com sucesso!');
+  } catch (error) {
+    console.error('Erro ao criar conta:', error);
+    mostrarToast(mensagemErroAutenticacao(error, true), 'erro');
+  } finally {
+    botao.disabled = false;
+  }
 });
 
-document.getElementById('btn-login').addEventListener('click', () => {
+document.getElementById('btn-login').addEventListener('click', async () => {
   const email = document.getElementById('auth-email').value.trim();
   const pass = document.getElementById('auth-pass').value;
   if (!email || !pass) return mostrarToast("Preencha e-mail e senha!", "erro");
-
-  signInWithEmailAndPassword(auth, email, pass)
-    .then(() => mostrarToast("Login efetuado!"))
-    .catch(err => mostrarToast("E-mail ou senha incorretos", "erro"));
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+  } catch (error) {
+    console.error('Erro ao entrar:', error);
+    mostrarToast(mensagemErroAutenticacao(error), 'erro');
+  }
 });
 
 const formAdminUsuario = document.getElementById('form-admin-usuario');
@@ -1780,13 +1924,7 @@ if (formAdminUsuario) {
 const btnLimparAdminUsuario = document.getElementById('admin-btn-limpar-usuario');
 if (btnLimparAdminUsuario) {
   btnLimparAdminUsuario.addEventListener('click', () => {
-    const formAdmin = document.getElementById('form-admin-usuario');
-    if (formAdmin) formAdmin.reset();
-    const inputId = document.getElementById('admin-user-id');
-    if (inputId) inputId.value = '';
-    document.getElementById('admin-user-email').readOnly = false;
-    document.getElementById('admin-user-role').disabled = false;
-    document.getElementById('admin-user-senha').placeholder = 'Obrigatória para nova conta';
+    limparFormularioUsuarioAdmin();
   });
 }
 
@@ -1830,7 +1968,37 @@ onAuthStateChanged(auth, async (user) => {
 
   if (user) {
     usuarioAtual = user;
-    perfilUsuarioAtual = await garantirPerfilUsuario(user);
+    try {
+      perfilUsuarioAtual = await garantirPerfilUsuario(user);
+    } catch (error) {
+      console.error('Não foi possível validar o perfil Firestore durante o login:', error);
+      if (auth.currentUser?.uid !== user.uid) return;
+      usuarioAtual = null;
+      perfilUsuarioAtual = null;
+      aplicarAcessoAdmin();
+      document.getElementById('main-header').classList.add('escondido');
+      mostrarToast('Não foi possível validar seu acesso. Tente entrar novamente.', 'erro');
+      try {
+        await signOut(auth);
+      } catch (signOutError) {
+        console.error('Não foi possível encerrar uma sessão sem perfil válido:', signOutError);
+      }
+      return;
+    }
+
+    if (auth.currentUser?.uid !== user.uid) return;
+    if (!perfilUsuarioAtual) {
+      usuarioAtual = null;
+      aplicarAcessoAdmin();
+      document.getElementById('main-header').classList.add('escondido');
+      mostrarToast('Acesso negado: não existe um perfil cadastrado para esta conta.', 'erro');
+      try {
+        await signOut(auth);
+      } catch (error) {
+        console.error('Não foi possível encerrar uma sessão sem perfil cadastrado:', error);
+      }
+      return;
+    }
     aplicarAcessoAdmin();
     document.getElementById('main-header').classList.remove('escondido');
     if (lockscreen) {
@@ -3589,6 +3757,7 @@ document.getElementById('album-file').addEventListener('change', (e) => {
 // FAIXAS DINÂMICAS
 const containerFaixas = document.getElementById('container-faixas');
 document.getElementById('btn-add-faixa').addEventListener('click', () => addLinhaFaixa());
+document.getElementById('btn-add-faixa-final').addEventListener('click', () => addLinhaFaixa());
 
 function formatarDuracao(segundos) {
   const horas = Math.floor(segundos / 3600).toString().padStart(2, '0');
@@ -4016,17 +4185,24 @@ async function carregarAlbuns() {
   grid.innerHTML = 'Carregando...';
 
   try {
-    const snapshot = await getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid)));
+    const [snapshot, historicoResultado, legadoResultado] = await Promise.all([
+      getDocs(query(collection(db, 'albuns'), where('userId', '==', usuarioAtual.uid))),
+      getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)))
+        .then((historico) => ({ historico }))
+        .catch((erro) => ({ erro })),
+      getDocs(query(collection(db, 'reaudicoes'), where('userId', '==', usuarioAtual.uid)))
+        .then((legados) => ({ legados }))
+        .catch((erro) => ({ erro }))
+    ]);
     const documentosHistorico = [];
-    try {
-      const historico = await getDocs(query(collection(db, 'historico_reaudicoes'), where('userId', '==', usuarioAtual.uid)));
-      historico.docs.forEach((docSnap) => documentosHistorico.push({ id: docSnap.id, data: docSnap.data(), origemColecao: 'historico' }));
-    } catch (erro) {
-      console.error('Não foi possível consultar historico_reaudicoes:', erro);
+    if (historicoResultado.historico) {
+      historicoResultado.historico.docs.forEach((docSnap) => documentosHistorico.push({ id: docSnap.id, data: docSnap.data(), origemColecao: 'historico' }));
+    } else {
+      console.error('Não foi possível consultar historico_reaudicoes:', historicoResultado.erro);
       reaudicoesLista.forEach((registro) => documentosHistorico.push({ id: registro.id, data: registro, origemColecao: 'cache' }));
     }
-    try {
-      const legados = await getDocs(query(collection(db, 'reaudicoes'), where('userId', '==', usuarioAtual.uid)));
+    if (legadoResultado.legados) {
+      const legados = legadoResultado.legados;
       const idsPresentes = new Set(documentosHistorico.map((item) => `${item.origemColecao}:${item.id}`));
       reaudicoesLegadas = [];
       legados.docs.forEach((docSnap) => {
@@ -4038,7 +4214,7 @@ async function carregarAlbuns() {
       const atuais = reaudicoesLista.filter((item) => item.colecaoDados !== 'reaudicoes');
       reaudicoesLista = [...atuais, ...reaudicoesLegadas];
       renderizarReaudicoes();
-    } catch (erro) {
+    } else {
       console.info('Coleção legada reaudicoes indisponível; mantendo as coleções atuais.');
     }
 
@@ -4824,6 +5000,136 @@ function renderizarGraficosEstatisticas(albuns, albunsTodasBandas = albuns, regi
   renderizarHeatmapAtividade(registrosAtividade);
   renderizarGraficoTendenciaTemporal(registrosAtividade);
   renderizarGraficoPosicaoFaixas(albuns);
+  renderizarGraficoDecadas(albuns);
+}
+
+function agruparAlbunsPorDecada(albuns) {
+  const decadas = new Map();
+  albuns.forEach((album) => {
+    const ano = Number(album.ano);
+    if (!Number.isFinite(ano) || ano <= 0) return;
+    const decada = Math.floor(ano / 10) * 10;
+    const grupo = decadas.get(decada) || { decada, totalAlbuns: 0, somaNotas: 0, qtdNotas: 0 };
+    grupo.totalAlbuns += 1;
+    const nota = album.media === '' || album.media === null || album.media === undefined
+      ? Number.NaN
+      : Number(album.media);
+    if (Number.isFinite(nota) && nota >= 0 && nota <= 10) {
+      grupo.somaNotas += nota;
+      grupo.qtdNotas += 1;
+    }
+    decadas.set(decada, grupo);
+  });
+  return [...decadas.values()]
+    .sort((a, b) => a.decada - b.decada)
+    .map((grupo) => ({
+      ...grupo,
+      media: grupo.qtdNotas ? grupo.somaNotas / grupo.qtdNotas : null
+    }));
+}
+
+function rotuloDecada(decada) {
+  const anoRotulo = decada >= 2000
+    ? decada
+    : decada >= 1900
+      ? decada % 100
+      : decada;
+  return `Anos ${anoRotulo}`;
+}
+
+function renderizarGraficoDecadas(albuns) {
+  if (graficoDecadas) {
+    graficoDecadas.destroy();
+    graficoDecadas = null;
+  }
+  const canvas = document.getElementById('graficoDecadas');
+  const resumo = document.getElementById('resumo-grafico-decada');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const grupos = agruparAlbunsPorDecada(albuns);
+  if (resumo) {
+    resumo.textContent = grupos.length
+      ? ''
+      : 'Cadastre álbuns com ano de lançamento para visualizar os dados por década.';
+  }
+  if (!grupos.length) return;
+
+  graficoDecadas = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: grupos.map((grupo) => rotuloDecada(grupo.decada)),
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Quantidade de álbuns',
+          data: grupos.map((grupo) => grupo.totalAlbuns),
+          yAxisID: 'yAlbuns',
+          backgroundColor: 'rgba(138, 43, 226, 0.68)',
+          borderColor: '#8A2BE2',
+          borderWidth: 1,
+          borderRadius: 5,
+          maxBarThickness: 48
+        },
+        {
+          type: 'line',
+          label: 'Nota média',
+          data: grupos.map((grupo) => grupo.media),
+          yAxisID: 'yNota',
+          borderColor: '#FFD166',
+          backgroundColor: '#FFD166',
+          pointBackgroundColor: '#FFD166',
+          pointBorderColor: '#fff3cf',
+          pointBorderWidth: 2,
+          pointRadius: 5,
+          pointHoverRadius: 8,
+          borderWidth: 3,
+          tension: 0.25,
+          spanGaps: true
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            label: (context) => context.dataset.yAxisID === 'yNota'
+              ? !Number.isFinite(context.parsed.y)
+                ? `${context.dataset.label}: sem notas`
+                : `${context.dataset.label}: ${context.parsed.y.toFixed(2)}/10`
+              : `${context.dataset.label}: ${context.parsed.y}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#a7a094', maxRotation: 0 },
+          grid: { display: false }
+        },
+        yAlbuns: {
+          type: 'linear',
+          position: 'left',
+          beginAtZero: true,
+          title: { display: true, text: 'Quantidade de álbuns', color: '#b7b2a8' },
+          ticks: { color: '#c084fc', precision: 0 },
+          grid: { color: 'rgba(210, 195, 170, 0.08)' }
+        },
+        yNota: {
+          type: 'linear',
+          position: 'right',
+          min: 0,
+          max: 10,
+          title: { display: true, text: 'Nota média (0–10)', color: '#FFD166' },
+          ticks: { color: '#FFD166', stepSize: 2 },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
 }
 
 function obterDataAtividade(album) {
@@ -5554,44 +5860,21 @@ async function carregarEstatisticas(recarregarDados = true) {
   document.getElementById('stat-album-enxuto').innerText = `${albumEnxuto?.nome || '-'} (${albumEnxuto?.faixas?.length || 0})`;
   document.getElementById('stat-total-faixas').innerText = totalFaixas;
 
-  const decadas = {};
-  albuns.forEach(a => {
-    const ano = Number(a.ano);
-    const nota = Number(a.media);
-    if (Number.isFinite(ano) && ano > 0) {
-      const decada = Math.floor(ano / 10) * 10;
-      if (!decadas[decada]) decadas[decada] = { soma: 0, qtdNotas: 0, totalAlbuns: 0 };
-      decadas[decada].totalAlbuns += 1;
-      if (Number.isFinite(nota) && nota >= 0 && nota <= 10) {
-        decadas[decada].soma += nota;
-        decadas[decada].qtdNotas += 1;
-      }
-    }
-  });
-
   let decadaMaiorMedia = '-';
   let maiorMedia = 0;
   let decadaMaisQtd = '-';
   let maiorQtd = 0;
 
-  const labelsDecadas = Object.keys(decadas).sort((a, b) => Number(a) - Number(b));
-  labelsDecadas.forEach((d) => {
-    const qtd = decadas[d].qtdNotas;
-    const totalAlbuns = decadas[d].totalAlbuns;
-
+  agruparAlbunsPorDecada(albuns).forEach(({ decada, totalAlbuns, media }) => {
     if (totalAlbuns > maiorQtd) {
       maiorQtd = totalAlbuns;
-      decadaMaisQtd = `${d}s (${totalAlbuns} álbuns)`;
+      decadaMaisQtd = `${decada}s (${totalAlbuns} álbuns)`;
     }
-    if (!qtd) return;
-
-    const media = parseFloat((decadas[d].soma / qtd).toFixed(2));
-
-    if (decadaMaiorMedia === '-' || media > maiorMedia) {
-      maiorMedia = media;
-      decadaMaiorMedia = `${d}s (${media} de média)`;
+    const mediaArredondada = media === null ? null : Number(media.toFixed(2));
+    if (mediaArredondada !== null && (decadaMaiorMedia === '-' || mediaArredondada > maiorMedia)) {
+      maiorMedia = mediaArredondada;
+      decadaMaiorMedia = `${decada}s (${mediaArredondada} de média)`;
     }
-
   });
 
   document.getElementById('stat-decada-media').innerText = decadaMaiorMedia;
@@ -5894,6 +6177,8 @@ let garagemWatchId = null;
 let garagemMaps = [];
 let garagemTimerInterval = null;
 let garagemManualRotaFallback = false;
+let garagemRenderAgendado = false;
+let garagemViagensPrecisamRenderizar = false;
 
 function garagemElemento(id) {
   return document.getElementById(id);
@@ -5961,11 +6246,35 @@ function garagemPrepararViagemFirestore(dados) {
 }
 
 function garagemMonitorBase(id) {
-  const registros = garagemRegistros
-    .filter((registro) => registro.tipo === 'manutencao' && registro.monitorId === id)
-    .sort((a, b) => garagemDataMillis(b.data) - garagemDataMillis(a.data)
-      || new Date(b.atualizadoEm || b.criadoEm || 0).getTime() - new Date(a.atualizadoEm || a.criadoEm || 0).getTime());
-  return Number(registros[0]?.km || 0);
+  const monitor = typeof id === 'object'
+    ? id
+    : garagemConfig.monitores.find((item) => item.id === id);
+  if (!monitor) return 0;
+  const nomeMonitor = String(monitor.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+  return garagemRegistros.reduce((base, registro) => {
+    if (registro.tipo !== 'manutencao') return base;
+    if (registro.monitorId && registro.monitorId !== monitor.id) return base;
+    if (!registro.monitorId) {
+      const nomeRegistro = String(registro.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+      const palavrasMonitor = nomeMonitor.split(/\s+/).filter((palavra) => palavra.length > 2);
+      if (!nomeRegistro || !palavrasMonitor.some((palavra) => nomeRegistro.split(/\s+/).includes(palavra))) return base;
+    }
+    return Math.max(base, Number(registro.km || 0));
+  }, 0);
+}
+
+function garagemMonitorEstado(monitor) {
+  const intervalo = Number(monitor?.intervalo);
+  const odometro = Number(garagemConfig.odometro);
+  const kmNoCiclo = Math.max(0, (Number.isFinite(odometro) ? odometro : 0) - garagemMonitorBase(monitor));
+  if (!Number.isFinite(intervalo) || intervalo <= 0) {
+    return { restante: 0, excedido: 0, percentual: 0 };
+  }
+  return {
+    restante: Math.max(0, intervalo - kmNoCiclo),
+    excedido: Math.max(0, kmNoCiclo - intervalo),
+    percentual: Math.min(100, Math.max(0, (kmNoCiclo / intervalo) * 100))
+  };
 }
 
 function garagemRenderizarMonitores() {
@@ -5973,11 +6282,14 @@ function garagemRenderizarMonitores() {
   if (!lista) return;
   const monitores = garagemConfig.monitores || [];
   lista.innerHTML = monitores.length ? monitores.map((monitor) => {
-    const base = garagemMonitorBase(monitor.id);
-    const perc = Math.min(100, Math.max(0, ((garagemConfig.odometro - base) / monitor.intervalo) * 100));
-    const restante = Math.max(0, monitor.intervalo - (garagemConfig.odometro - base));
-    const nivel = perc >= 85 ? 'danger' : perc >= 60 ? 'warn' : '';
-    return `<article class="garagem-monitor"><div class="garagem-monitor-head"><span>${garagemEscapar(monitor.nome)}</span><span>${garagemFormatarKm(restante)} restantes<br>limite: ${garagemFormatarKm(monitor.intervalo)}</span></div><div class="garagem-progress"><i class="${nivel}" style="width:${perc}%"></i></div><div class="garagem-monitor-foot"><span>${Math.round(perc)}% do ciclo</span><div class="garagem-monitor-actions"><button type="button" class="btn-secundario btn-sm" data-garagem-troca="${monitor.id}">Registrar troca</button><button type="button" class="btn-secundario btn-sm" data-garagem-monitor-editar="${monitor.id}">Editar</button><button type="button" class="btn-perigo btn-sm" data-garagem-monitor-excluir="${monitor.id}">Excluir</button></div></div></article>`;
+    const estado = garagemMonitorEstado(monitor);
+    const nivel = estado.excedido > 0 || estado.percentual >= 85
+      ? 'danger'
+      : estado.percentual >= 60 ? 'warn' : '';
+    const indicador = estado.excedido > 0
+      ? `<strong class="garagem-monitor-alerta">⚠️ +${garagemFormatarKm(estado.excedido)} vencido</strong>`
+      : `${garagemFormatarKm(estado.restante)} restantes`;
+    return `<article class="garagem-monitor"><div class="garagem-monitor-head"><span>${garagemEscapar(monitor.nome)}</span><span>${indicador}<br>limite: ${garagemFormatarKm(monitor.intervalo)}</span></div><div class="garagem-progress"><i class="${nivel}" style="width:${estado.percentual}%"></i></div><div class="garagem-monitor-foot"><span>${Math.round(estado.percentual)}% do ciclo</span><div class="garagem-monitor-actions"><button type="button" class="btn-secundario btn-sm" data-garagem-troca="${monitor.id}">Registrar troca</button><button type="button" class="btn-secundario btn-sm" data-garagem-monitor-editar="${monitor.id}">Editar</button><button type="button" class="btn-perigo btn-sm" data-garagem-monitor-excluir="${monitor.id}">Excluir</button></div></div></article>`;
   }).join('') : '<p class="garagem-empty">Adicione as peças que deseja acompanhar.</p>';
   garagemElemento('garagem-monitor-opcoes').innerHTML = monitores.map((monitor) => `<option value="${garagemEscapar(monitor.nome)}"></option>`).join('');
 }
@@ -6028,10 +6340,23 @@ function garagemRenderizarDashboard() {
   const viagensKm = viagensFiltradas.reduce((total, item) => total + Number(item.distanciaKm || 0), 0);
   garagemElemento('garagem-odo-valor').textContent = garagemFormatarKm(garagemConfig.odometro);
   garagemElemento('garagem-odo-input').value = garagemConfig.odometro || '';
-  const monitorOleo = garagemConfig.monitores.find((monitor) => monitor.id === 'oleo' || monitor.nome.toLocaleLowerCase('pt-BR').includes('óleo'));
-  garagemElemento('garagem-oleo-restante').textContent = monitorOleo
-    ? garagemFormatarKm(Math.max(0, monitorOleo.intervalo - (garagemConfig.odometro - garagemMonitorBase(monitorOleo.id))))
-    : '— km';
+  const monitorOleo = (garagemConfig.monitores || []).find((monitor) =>
+    normalizarTexto(monitor.id) === 'oleo' || normalizarTexto(monitor.nome).includes('oleo')
+  );
+  const oleoRestante = garagemElemento('garagem-oleo-restante');
+  const oleoAlerta = garagemElemento('garagem-oleo-alerta');
+  const estadoOleo = monitorOleo ? garagemMonitorEstado(monitorOleo) : null;
+  if (estadoOleo?.excedido > 0) {
+    oleoRestante.textContent = `+${garagemFormatarKm(estadoOleo.excedido)} vencido`;
+    oleoRestante.classList.add('garagem-alerta-texto');
+    oleoAlerta.textContent = `⚠️ Passou ${garagemFormatarKm(estadoOleo.excedido)} do limite!`;
+    oleoAlerta.classList.add('garagem-alerta');
+  } else {
+    oleoRestante.textContent = estadoOleo ? garagemFormatarKm(estadoOleo.restante) : '— km';
+    oleoRestante.classList.remove('garagem-alerta-texto');
+    oleoAlerta.textContent = 'restantes';
+    oleoAlerta.classList.remove('garagem-alerta');
+  }
   garagemElemento('garagem-media-consumo').textContent = totalLitros > 0 && totalRodado > 0 ? `${(totalRodado / totalLitros).toFixed(1)} km/L` : '— km/L';
   garagemElemento('garagem-total-rodado').textContent = garagemFormatarKm(totalRodadoFiltrado + viagensKm);
   garagemElemento('garagem-total-gasto').textContent = gastosFiltrados.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -6119,14 +6444,41 @@ function renderizarGaragem() {
   garagemRenderizarDashboard();
   garagemRenderizarLogbook();
   garagemAtualizarEstatisticasViagens();
-  garagemRenderizarViagens();
+}
+
+function garagemAgendarRenderizacao(viagensAlteradas = false) {
+  garagemViagensPrecisamRenderizar = garagemViagensPrecisamRenderizar || viagensAlteradas;
+  if (garagemRenderAgendado) return;
+  garagemRenderAgendado = true;
+  requestAnimationFrame(() => {
+    garagemRenderAgendado = false;
+    renderizarGaragem();
+    if (garagemViagensPrecisamRenderizar && !garagemElemento('garagem-viagens').classList.contains('escondido')) {
+      garagemRenderizarViagens();
+    }
+    garagemViagensPrecisamRenderizar = false;
+  });
 }
 
 async function garagemSalvarConfig(alteracoes) {
   if (!usuarioAtual) throw new Error('Faça login para salvar dados da garagem.');
+  const configRef = doc(db, GARAGEM_COLECOES.config, usuarioAtual.uid);
+  const atualizadoEm = new Date().toISOString();
+  if (Object.prototype.hasOwnProperty.call(alteracoes, 'odometro')) {
+    await runTransaction(db, async (transacao) => {
+      const snapshot = await transacao.get(configRef);
+      transacao.set(configRef, {
+        ...(snapshot.exists() ? snapshot.data() : {}),
+        ...alteracoes,
+        userId: usuarioAtual.uid,
+        atualizadoEm
+      });
+    });
+  } else {
+    await setDoc(configRef, { ...alteracoes, userId: usuarioAtual.uid, atualizadoEm }, { merge: true });
+  }
   garagemConfig = { ...garagemConfig, ...alteracoes };
-  await setDoc(doc(db, GARAGEM_COLECOES.config, usuarioAtual.uid), { ...alteracoes, userId: usuarioAtual.uid, atualizadoEm: new Date().toISOString() }, { merge: true });
-  renderizarGaragem();
+  garagemAgendarRenderizacao();
 }
 
 async function garagemSalvarViagemSincronizada(dados, id) {
@@ -6160,12 +6512,37 @@ async function garagemExcluirViagemSincronizada(id) {
 }
 
 async function garagemSalvarRegistro(dados, id) {
-  if (!usuarioAtual) return;
+  if (!usuarioAtual) throw new Error('Faça login para salvar registros da garagem.');
   const referencia = id ? doc(db, GARAGEM_COLECOES.registros, id) : doc(collection(db, GARAGEM_COLECOES.registros));
-  const payload = { ...dados, userId: usuarioAtual.uid, atualizadoEm: new Date().toISOString() };
-  if (id) await updateDoc(referencia, payload);
-  else await setDoc(referencia, { ...payload, criadoEm: new Date().toISOString() });
-  if (Number(dados.km) > Number(garagemConfig.odometro || 0)) await garagemSalvarConfig({ odometro: Number(dados.km) });
+  const configRef = doc(db, GARAGEM_COLECOES.config, usuarioAtual.uid);
+  const km = Number(dados.km);
+  if (!Number.isFinite(km) || km < 0) throw new Error('Informe um odômetro válido.');
+  const agora = new Date().toISOString();
+  const payload = { ...dados, userId: usuarioAtual.uid, atualizadoEm: agora };
+  await runTransaction(db, async (transacao) => {
+    const [registroSnap, configSnap] = await Promise.all([
+      transacao.get(referencia),
+      transacao.get(configRef)
+    ]);
+    const configAtual = configSnap.exists() ? configSnap.data() : {};
+    transacao.set(referencia, {
+      ...payload,
+      ...(!id ? { criadoEm: agora } : registroSnap.exists() ? { criadoEm: registroSnap.data().criadoEm || agora } : {})
+    });
+    transacao.set(configRef, {
+      ...configAtual,
+      userId: usuarioAtual.uid,
+      odometro: Math.max(Number(configAtual.odometro || 0), km),
+      ciclos: configAtual.ciclos || { oleo: 0, pastilha: 0, relacao: 0 },
+      atualizadoEm: agora
+    });
+  });
+  garagemConfig = { ...garagemConfig, odometro: Math.max(Number(garagemConfig.odometro || 0), km) };
+  const indice = garagemRegistros.findIndex((registro) => registro.id === referencia.id);
+  const registroAtualizado = { ...payload, id: referencia.id };
+  if (indice < 0) garagemRegistros = [...garagemRegistros, { ...registroAtualizado, criadoEm: agora }];
+  else garagemRegistros = garagemRegistros.map((registro, index) => index === indice ? { ...registro, ...registroAtualizado } : registro);
+  garagemAgendarRenderizacao();
   mostrarToast(id ? 'Registro atualizado.' : 'Registro salvo.');
 }
 
@@ -6446,15 +6823,15 @@ function garagemIniciarInscricoes(uid) {
         mostrarToast('Não foi possível carregar os monitores personalizados.', 'erro');
       });
     }
-    renderizarGaragem();
+    garagemAgendarRenderizacao();
   }, (erro) => { console.error('Falha ao sincronizar configurações da garagem:', erro); mostrarToast('Erro ao carregar o odômetro.', 'erro'); }));
   garagemUnsubs.push(onSnapshot(query(collection(db, GARAGEM_COLECOES.registros), where('userId', '==', uid)), (snapshot) => {
     garagemRegistros = snapshot.docs.map((registro) => ({ id: registro.id, ...registro.data() }));
-    renderizarGaragem();
+    garagemAgendarRenderizacao();
   }, (erro) => { console.error('Falha ao sincronizar logbook:', erro); mostrarToast('Erro ao carregar o logbook.', 'erro'); }));
   garagemUnsubs.push(onSnapshot(query(collection(db, GARAGEM_COLECOES.viagens), where('userId', '==', uid)), (snapshot) => {
     garagemViagens = snapshot.docs.map((registro) => ({ id: registro.id, ...registro.data() }));
-    renderizarGaragem();
+    garagemAgendarRenderizacao(true);
   }, (erro) => { console.error('Falha ao sincronizar viagens da garagem:', erro); mostrarToast('Erro ao carregar viagens.', 'erro'); }));
   garagemUnsubs.push(onSnapshot(doc(db, GARAGEM_COLECOES.ativa, uid), (snapshot) => {
     garagemViagemAtiva = snapshot.exists() ? snapshot.data() : null;

@@ -327,6 +327,9 @@
                             </button>
                         </div>
                         <div id="container-faixas" class="lista-faixas-inputs"></div>
+                        <button type="button" id="btn-add-faixa-final" class="btn-secundario btn-sm faixas-add-bottom">
+                            Adicionar Faixa
+                        </button>
                     </div>
 
                     <div class="form-acoes">
@@ -353,7 +356,7 @@
             <div id="garagem-manutencao" class="garagem-panel">
                 <div class="garagem-stats">
                     <article class="garagem-stat"><span>Odômetro geral</span><strong id="garagem-odo-valor">— km</strong><form id="garagem-odo-form"><label class="sr-only" for="garagem-odo-input">Odômetro atual</label><input id="garagem-odo-input" type="number" min="0" step="0.1" placeholder="Atualizar km" required><button class="btn-secundario btn-sm" type="submit">Salvar</button></form></article>
-                    <article class="garagem-stat"><span>Próxima troca de óleo</span><strong id="garagem-oleo-restante">— km</strong><small>restantes</small></article>
+                    <article class="garagem-stat"><span>Próxima troca de óleo</span><strong id="garagem-oleo-restante">— km</strong><small id="garagem-oleo-alerta">restantes</small></article>
                     <article class="garagem-stat"><span>Média geral</span><strong id="garagem-media-consumo">— km/L</strong></article>
                     <article class="garagem-stat"><span>Total rodado</span><strong id="garagem-total-rodado">— km</strong><div class="garagem-stat-filters"><label class="sr-only" for="garagem-filtro-mes">Mês</label><select id="garagem-filtro-mes"><option value="">Todos os meses</option></select><label class="sr-only" for="garagem-filtro-ano">Ano</label><select id="garagem-filtro-ano"><option value="">Todos os anos</option></select></div></article>
                     <article class="garagem-stat"><span>Gastos totais</span><strong id="garagem-total-gasto">R$ 0,00</strong><small>peças + combustível</small></article>
@@ -957,6 +960,13 @@
                     <p class="grafico-descricao">Mostra quantos álbuns têm cada número de faixa marcado como favorito.</p>
                     <div class="canvas-wrapper canvas-wrapper--compact"><canvas id="graficoPosicaoFaixas"></canvas></div>
                 </section>
+
+                <section class="container-grafico decadas-estatisticas" aria-labelledby="titulo-grafico-decadas">
+                    <h3 id="titulo-grafico-decadas">Gráfico por Década</h3>
+                    <p class="grafico-descricao">Quantidade de álbuns e nota média por década de lançamento.</p>
+                    <div class="canvas-wrapper canvas-wrapper--compact"><canvas id="graficoDecadas" role="img" aria-label="Gráfico de quantidade e nota média dos álbuns por década"></canvas></div>
+                    <p id="resumo-grafico-decada" class="grafico-descricao" aria-live="polite"></p>
+                </section>
             </div>
 
             <section id="widget-aniversario" class="container-grafico widget-aniversario escondido" aria-labelledby="widget-aniversario-titulo">
@@ -1056,6 +1066,7 @@
 
             <div class="admin-panel">
                 <form id="form-admin-usuario" class="glass-form admin-form">
+                    <h3 id="admin-user-form-title">Cadastrar usuário</h3>
                     <input type="hidden" id="admin-user-id">
 
                     <div class="grupo-campo">
