@@ -2,7 +2,7 @@
 
 Uma aplicação web interativa, moderna e responsiva para **avaliação detalhada de álbuns musicais**, acompanhada de um painel estatístico e organizador pessoal. O projeto conta com design **Glassmorphism**, fundo canvas reativo, tela de bloqueio dinâmica (Lockscreen estilo Windows) e integração em tempo real com o **Firebase Firestore**.
 
-🚀 **Acesse o projeto online:** [https://matheuspiresdev.github.io/EDCCM/](https://matheuspiresdev.github.io/EEDCCM/)
+🚀 **Acesse o projeto online:** [https://matheuspiresdev.github.io/EEDCCM/](https://matheuspiresdev.github.io/EEDCCM/)
 
 ---
 
