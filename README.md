@@ -11,7 +11,7 @@ Uma aplicação web interativa, moderna e responsiva para **avaliação detalhad
 ### 🎧 1. Avaliação e Gestão de Álbuns
 - **Cadastro Detalhado:** Registro de nome, artista/banda, ano de lançamento, subgênero, capa (upload ou URL), música favorita e observações gerais.
 - **Busca de Metadados:** Autocomplete opcional pelo iTunes Search com até 200 resultados para ampliar a cobertura de discografias e preencher artista, álbum, ano e capa em alta resolução; quando a API disponibiliza as faixas, a duração total também é calculada. Os campos continuam editáveis.
-- **Widget de Aniversário:** Integrado ao painel de Estatísticas, exibe idade, progresso anual violeta e contagem regressiva; no dia 12 de novembro ativa o tema de aniversário, a supernova no canvas e uma chuva discreta de palhetas.
+
 - **Sistema de Faixas e Notas:** Adição dinâmica de faixas com notas individuais e cálculo automático da média do álbum.
 - **Busca e Filtros Avançados:** Filtre seus álbuns por nome, artista, ano ou ordene por mais recentes, melhores/piores notas e ano de lançamento.
 - **Paginação:** Exibição fluida em grade responsiva com paginação.
